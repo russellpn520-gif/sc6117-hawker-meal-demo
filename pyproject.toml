@@ -8,5 +8,5 @@ dependencies = [
     "pillow>=10,<14",
     "pydantic>=2,<3",
     "pywin32-ctypes>=0.2.3,<1 ; sys_platform == 'win32'",
-    "streamlit>=1.50,<2",
+    "streamlit>=1.67,<2",
 ]

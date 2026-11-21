@@ -2,24 +2,22 @@ import hashlib
 import os
 import sqlite3
 import sys
-from datetime import datetime, timedelta
-from pathlib import Path
-from tempfile import TemporaryDirectory
+from datetime import datetime
 
 import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
 
 from api_credentials import read_api_key, save_windows_key
+from device_diary import cloud_diary
 from meals import (
-    SG_TIME, list_meals, load_foods, match_text, portion_items, save_meal,
-    schedule_workout, total_nutrients, workout_days,
+    SG_TIME, get_profile, list_meals, load_foods, match_text, portion_items, save_meal, total_nutrients,
 )
+from plan_ui import calendar_for_view, day_summary, profile_form, settings, training_plan
+from planning import calorie_balance, day_plan
 
 
 FOODS = load_foods()
 EXAMPLE = "白饭、水煮鸡"
-# Fictional targets for demonstrating what a change of training day does.
-TARGETS = {"训练日": (2200, 110), "休息日": (2000, 100)}
 
 
 def photo_api_key(*, use_qwen):
@@ -67,7 +65,7 @@ def photo_api_key(*, use_qwen):
 
 
 def input_draft(public_demo=False):
-    mode = st.radio("录入方式", ["按菜名查表", "照片识别"], horizontal=True)
+    mode = st.radio("录入方式", ["照片识别", "按菜名查表"], index=0 if public_demo else 1, horizontal=True)
     current = st.session_state.draft
     if mode == "按菜名查表":
         text = st.text_input("这餐吃了什么？", value=EXAMPLE, max_chars=400,
@@ -87,7 +85,10 @@ def input_draft(public_demo=False):
         return None
     if use_qwen:
         st.caption("点击识别时，这张照片会发送给阿里云百炼北京区的 Qwen4-Max。")
-    upload = st.file_uploader("选择餐食照片", type=["jpg", "jpeg", "png"], max_upload_size=8)
+    if st.toggle("直接用相机拍", key="use_camera"):
+        upload = st.camera_input("拍下这餐", help="请允许相机权限，也可以关闭上方开关，改从相册选择。")
+    else:
+        upload = st.file_uploader("选择餐食照片", type=["jpg", "jpeg", "png"], max_upload_size=8)
     if upload is None:
         return None
     from recognition import identify_photo, prepare_photo
@@ -169,23 +170,27 @@ def edit_meal(draft, db_path=None):
         quantity_key = f"grams-{draft['id']}-{food_id}"
         if quantity_key not in st.session_state:
             st.session_state[quantity_key] = suggested.get(food_id, food.serving_g)
-        name, amount, shortcut = st.columns([1.6, 1, 0.8], vertical_alignment="center")
-        name.markdown(f"**{food.name}**")
-        name.caption(f"标准一份 {food.serving_g} g")
-        weights[food_id] = amount.number_input(f"{food.name}重量（克）", min_value=1,
-                                               max_value=3000, key=quantity_key)
-        shortcut.button("半份", key=f"half-{draft['id']}-{food_id}",
-                        on_click=set_grams, args=(quantity_key, food.serving_g // 2))
+        with st.container(key=f"portion_row_{food_id}"):
+            name, amount, shortcut = st.columns([1.5, 1, 0.7], gap="small", vertical_alignment="center")
+            name.markdown(f"**{food.name}**")
+            name.caption(f"标准一份 {food.serving_g} g")
+            weights[food_id] = amount.number_input(f"{food.name}重量（克）", min_value=1,
+                                                   max_value=3000, key=quantity_key)
+            shortcut.button("半份", key=f"half-{draft['id']}-{food_id}",
+                            on_click=set_grams, args=(quantity_key, food.serving_g // 2))
     items = portion_items(FOODS, weights)
     totals = total_nutrients([item["nutrients"] for item in items])
-    st.divider()
-    for col, (label, value) in zip(st.columns(4), [
-        ("热量", f"{totals['kcal']:.0f} kcal"), ("蛋白质", f"{totals['protein_g']:.1f} g"),
-        ("碳水", f"{totals['carb_g']:.1f} g"), ("脂肪", f"{totals['fat_g']:.1f} g"),
-    ]):
-        col.metric(label, value)
-    st.caption("按参考份量折算。摊位用油、酱料和实际重量会影响结果。")
+    with st.container(key="meal_totals"):
+        kcal, protein = st.columns(2)
+        kcal.metric("这餐热量", f"{totals['kcal']:.0f} kcal")
+        protein.metric("这餐蛋白质", f"{totals['protein_g']:.1f} g")
+    if st.button("确认并记入今天", type="primary", width="stretch", disabled=not acknowledged):
+        save_meal(draft, items, db_path=db_path)
+        st.session_state.saved = datetime.now(SG_TIME).date()
+        st.rerun()
     with st.expander("查看食物数值与来源"):
+        st.write(f"这餐还含碳水 {totals['carb_g']:.1f} g、脂肪 {totals['fat_g']:.1f} g。")
+        st.caption("按参考份量折算。摊位用油、酱料和实际重量会影响结果。")
         for item in items:
             ref = item["reference_nutrients"]
             st.markdown(
@@ -193,44 +198,6 @@ def edit_meal(draft, db_path=None):
                 f"蛋白质 {ref['protein_g']:g} g，碳水 {ref['carb_g']:g} g，脂肪 {ref['fat_g']:g} g。"
                 f" [HPB 附表 A · {item['source_name']}]({item['source_url']})"
             )
-    if st.button("确认并记入今天", type="primary", disabled=not acknowledged):
-        save_meal(draft, items, db_path=db_path)
-        st.session_state.saved = True
-        st.rerun()
-
-
-def show_plan(today, records, db_path=None):
-    tomorrow = today + timedelta(days=1)
-    planned = workout_days(today, tomorrow, db_path=db_path)
-    today_trains = today.isoformat() in planned
-    tomorrow_trains = tomorrow.isoformat() in planned
-    day_type = "训练日" if today_trains else "休息日"
-    next_type = "训练日" if tomorrow_trains else "休息日"
-    kcal_goal, protein_goal = TARGETS[day_type]
-    consumed = total_nutrients([record["totals"] for record in records])
-
-    st.subheader("今日安排")
-    st.write(f"**{today:%m 月 %d 日} · {day_type}**")
-    st.caption(f"示例目标 {kcal_goal} kcal · 蛋白质 {protein_goal} g")
-    for label, left, unit in [
-        ("热量", kcal_goal - consumed["kcal"], "kcal"),
-        ("蛋白质", protein_goal - consumed["protein_g"], "g"),
-    ]:
-        st.metric(label + ("还差" if left >= 0 else "超出"), f"{abs(left):.0f} {unit}")
-    st.divider()
-    st.caption(f"明天 · {next_type} · {TARGETS[next_type][0]} kcal / {TARGETS[next_type][1]} g 蛋白质")
-    if today_trains and not tomorrow_trains:
-        label, destination, origin = "把今天的训练移到明天", tomorrow, today
-    elif tomorrow_trains and not today_trains:
-        label, destination, origin = "把明天的训练移到今天", today, tomorrow
-    elif not today_trains:
-        label, destination, origin = "今天安排一次训练", today, None
-    else:
-        st.caption("今天和明天均已有训练。")
-        return
-    if st.button(label):
-        schedule_workout(destination, origin, db_path=db_path)
-        st.rerun()
 
 
 def show_history(records):
@@ -256,23 +223,57 @@ def show_history(records):
 
 
 def main(*, public_demo=False):
-    st.set_page_config(page_title="食阁记餐", page_icon="🍚", layout="wide")
+    st.set_page_config(page_title="食阁记餐", page_icon="🍚", layout="centered")
+    st.html("""<style>
+      @media (max-width: 640px) {
+        .stMainBlockContainer {padding-top: 3.4rem;}
+        :is(.st-key-body_measurements, .st-key-daily_balance, .st-key-meal_totals, [class*="st-key-portion_row_"]) [data-testid="stHorizontalBlock"] {
+          flex-direction: row; flex-wrap: nowrap; gap: .55rem;
+        }
+        :is(.st-key-body_measurements, .st-key-daily_balance, .st-key-meal_totals, [class*="st-key-portion_row_"]) [data-testid="stColumn"] {
+          flex: 1 1 0 !important; min-width: 0 !important; width: auto !important;
+        }
+        :is(.st-key-body_measurements, [class*="st-key-portion_row_"]) [data-testid^="stNumberInputStep"] {display: none;}
+        :is(.st-key-daily_balance, .st-key-meal_totals) [data-testid="stMetricValue"] {font-size: 1.45rem;}
+      }
+    </style>""")
     st.title("食阁记餐")
-    db_path = None
-    if public_demo:
-        st.caption("公开体验版 · 餐食和训练安排仅在你当前的浏览器会话中保留。")
-        if "log_directory" not in st.session_state:
-            st.session_state.log_directory = TemporaryDirectory(prefix="sc6117-meals-")
-        db_path = Path(st.session_state.log_directory.name) / "meals.sqlite3"
+    db_path = cloud_diary() if public_demo else None
     today = datetime.now(SG_TIME).date()
-    records = list_meals(today, db_path=db_path)
+    profile = get_profile(db_path=db_path)
+    if notice := st.session_state.pop("notice", None):
+        st.success(notice)
+    if st.session_state.get("edit_profile") or (profile is None and not st.session_state.get("guest")):
+        profile_form(profile, today, db_path, public_demo)
+        return
+    if st.session_state.get("saved") and st.session_state.saved != today:
+        st.session_state.pop("saved")
+        st.session_state.pop("draft", None)
     if "draft" not in st.session_state:
         st.session_state.draft = match_text(EXAMPLE, FOODS)
-    left, right = st.columns([1.85, 1], gap="large")
-    with left.container(border=True):
+    records = list_meals(today, db_path=db_path)
+    if profile:
+        days = calendar_for_view(profile, today, db_path)
+        plan = day_plan(profile, today, days)
+        eaten = total_nutrients([r["totals"] for r in records])
+        with st.container(border=True):
+            day_summary(profile, today, plan, eaten)
+    else:
+        st.caption("正在体验记餐。建档后，每餐都能看到今天还差多少。")
+        if st.button("建立我的个人计划"):
+            st.session_state.guest = False
+            st.rerun()
+    sections = ["记一餐", "训练安排", "今日记录"] if profile else ["记一餐", "今日记录"]
+    section = st.segmented_control("打开", sections, default="记一餐", key="section",
+                                   label_visibility="collapsed", selection_mode="single") or "记一餐"
+    if section == "记一餐":
         st.subheader("记录一餐")
         if st.session_state.get("saved"):
-            st.success("已记入今天的餐食日志。")
+            if profile:
+                label, value = calorie_balance(plan.kcal, eaten["kcal"])
+                st.success(f"已记入今天。{label} {value}。")
+            else:
+                st.success("已记入今天的餐食日志。")
             if st.button("再记一餐"):
                 st.session_state.saved = False
                 st.session_state.draft = match_text(EXAMPLE, FOODS)
@@ -281,9 +282,11 @@ def main(*, public_demo=False):
             draft = input_draft(public_demo)
             if draft is not None:
                 edit_meal(draft, db_path)
-    with right.container(border=True):
-        show_plan(today, records, db_path)
-    show_history(records)
+    elif section == "训练安排":
+        training_plan(profile, today, days, db_path)
+    else:
+        show_history(records)
+    settings(profile, db_path, public_demo)
 
 
 if __name__ == "__main__":

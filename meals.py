@@ -5,9 +5,11 @@ import re
 import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
+
+from planning import Profile
 
 
 ROOT = Path(__file__).resolve().parent
@@ -116,6 +118,8 @@ def open_db(db_path=None):
         );
         CREATE INDEX IF NOT EXISTS meals_by_day ON meals(day);
         CREATE TABLE IF NOT EXISTS workouts (day TEXT PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS rest_days (day TEXT PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS profile (id INTEGER PRIMARY KEY CHECK(id = 1), data TEXT NOT NULL);
     """)
     return db
 
@@ -160,3 +164,53 @@ def schedule_workout(destination, origin=None, *, db_path=None):
             result = db.execute("UPDATE OR IGNORE workouts SET day = ? WHERE day = ?",
                                 (destination.isoformat(), origin.isoformat()))
         return result.rowcount == 1
+
+
+def get_profile(*, db_path=None):
+    with closing(open_db(db_path)) as db:
+        row = db.execute("SELECT data FROM profile WHERE id = 1").fetchone()
+    return Profile.model_validate_json(row[0]) if row else None
+
+
+def save_profile(profile, *, db_path=None):
+    with closing(open_db(db_path)) as db, db:
+        db.execute("INSERT INTO profile VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data",
+                   (profile.model_dump_json(),))
+
+
+def _planned_days(db, profile, start, end):
+    days = {start + timedelta(days=i) for i in range((end - start).days + 1)
+            if profile.scheduled_by_default(start + timedelta(days=i))}
+    bounds = (start.isoformat(), end.isoformat())
+    days.update(date.fromisoformat(d) for d, in db.execute("SELECT day FROM workouts WHERE day BETWEEN ? AND ?", bounds))
+    days.difference_update(date.fromisoformat(d) for d, in db.execute("SELECT day FROM rest_days WHERE day BETWEEN ? AND ?", bounds))
+    return days
+
+
+def planned_days(profile, start, end, *, db_path=None):
+    with closing(open_db(db_path)) as db:
+        return _planned_days(db, profile, start, end)
+
+
+def move_workout(profile, origin, destination, *, db_path=None):
+    if origin == destination:
+        return False
+    with closing(open_db(db_path)) as db, db:
+        db.execute("BEGIN IMMEDIATE")
+        active = _planned_days(db, profile, min(origin, destination), max(origin, destination))
+        if origin not in active or destination in active:
+            return False
+        old, new = (origin.isoformat(),), (destination.isoformat(),)
+        db.execute("DELETE FROM workouts WHERE day = ?", old)
+        db.execute("INSERT OR IGNORE INTO rest_days VALUES (?)", old)
+        db.execute("DELETE FROM rest_days WHERE day = ?", new)
+        db.execute("INSERT OR IGNORE INTO workouts VALUES (?)", new)
+        return True
+
+
+def clear_diary(*, db_path=None):
+    with closing(open_db(db_path)) as db, db:
+        db.execute("DELETE FROM meals")
+        db.execute("DELETE FROM workouts")
+        db.execute("DELETE FROM rest_days")
+        db.execute("DELETE FROM profile")
