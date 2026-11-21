@@ -1,0 +1,10 @@
+.venv/
+.local/
+__pycache__/
+.env
+.streamlit/secrets.toml
+# Local-only loopback address and port. Community Cloud supplies its own server configuration.
+.streamlit/config.toml
+*.sqlite3*
+*.db
+.env.*
