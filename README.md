@@ -15,17 +15,17 @@ uv run streamlit run app.py --server.address 127.0.0.1 --server.port 8617
 
 打开 [本地应用](http://127.0.0.1:8617)。菜名查表、营养换算、记餐和训练改期均可离线运行。单用户日志按新加坡日期存入本机 `.local/meals.sqlite3`，重新打开页面仍能看到当天记录。测试可通过 `TRACK3_DB` 指向独立的 SQLite 文件。
 
-**照片识别。** 在 Windows 电脑的本机页面选「照片识别」，在「配置 OpenAI API Key」中粘贴个人密钥，点「保存密钥」。密钥保存在当前 Windows 用户的凭据管理器中，凭据名为 `SC6117/track3-demo/OpenAI`。在同一台电脑运行的手机入口刷新后即可使用。已有密钥副本可以直接使用；新建时请选对项目并当场复制完整密钥。[OpenAI 密钥管理页](https://platform.openai.com/api-keys) · [官方密钥说明](https://help.openai.com/en/articles/4936850-where-do-i-find-my-openai-api-key)
+**照片识别**使用阿里云百炼北京区的 `qwen4-max`。在 iPhone 上打开公开版，选「照片识别」，上传不超过 8 MB 的 JPG 或 PNG，点「发送照片给 Qwen4-Max 识别」。页面会显示候选食物、需要核对的项目，以及这次 API 回传的输入、输出和总 token。核对食物与克数后，点「确认并记入今天」。[Qwen4-Max 模型说明](https://www.alibabacloud.com/help/en/model-studio/qwen4-max)
 
-在 iPhone 上选「照片识别」，选择一张不超过 8 MB 的 JPG 或 PNG，再点「发送照片给 OpenAI 识别」。调用从运行应用的服务器发出，按密钥所属 API 项目计费。照片识别成功后，页面显示该次 API 回传的输入、输出和总 token 数。模型给出菜名候选和疑点，确认份量后才会记餐。菜名查表、改份量、记餐和训练改期均消耗 0 个 API token。
+本机启动前可在环境中设置北京区的 `DASHSCOPE_API_KEY`，使用与公开版相同的识别流程。菜名查表、改份量、记餐和训练改期均消耗 0 个 API token。
 
-各平台也可在启动服务的终端设置 `OPENAI_API_KEY`，该环境变量优先。默认模型为 `gpt-5.4-mini`；可用 `TRACK3_MODEL` 指定支持图片输入和结构化输出的模型。
+本机没有配置百炼时，可继续使用 OpenAI。设置 `OPENAI_API_KEY`，或在 Windows 本机页面的「照片识别 → 配置 OpenAI API Key」中保存密钥至当前用户的 Windows 凭据管理器。此模式默认使用 `gpt-5.4-mini`，可用 `TRACK3_MODEL` 另选兼容的 OpenAI 模型。
 
 ## Streamlit Community Cloud
 
 部署时选择 `main` 分支、入口 `cloud_app.py` 和 Python 3.12。公开体验版为每个浏览器会话单独保存餐食和训练安排。重新载入页面会开始新会话。iPhone 用相机扫描应用网址的二维码，点弹出的链接，即可在 Safari 使用。
 
-需要启用照片时，由维护者在应用的 **Settings → Secrets** 添加顶层 `OPENAI_API_KEY`。持有链接的访客均可发起付费识别，费用归这把密钥所属的 API 项目。未配置密钥时，访客可以使用完整的菜名查表流程。维护者把代码提交并推送至已部署的分支后，同一网址会自动更新。[Streamlit 更新说明](https://docs.streamlit.io/deploy/streamlit-community-cloud/manage-your-app)
+维护者在应用的 **Settings → Secrets** 设置顶层 `DASHSCOPE_API_KEY`。每次点击发送照片，服务器会调用百炼北京区。访客共用服务端密钥，调用按对应百炼工作空间的额度和价格结算。更换密钥只需更新 Secrets。维护者把代码推送至已部署的分支后，同一网址会自动更新。[百炼地域与接入地址](https://www.alibabacloud.com/help/en/model-studio/base-url) · [Streamlit 更新说明](https://docs.streamlit.io/deploy/streamlit-community-cloud/manage-your-app)
 
 ## 一分钟试用
 

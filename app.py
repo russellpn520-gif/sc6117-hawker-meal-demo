@@ -22,12 +22,12 @@ EXAMPLE = "白饭、水煮鸡"
 TARGETS = {"训练日": (2200, 110), "休息日": (2000, 100)}
 
 
-def photo_api_key(public_demo=False):
-    if public_demo:
-        key = os.environ.get("OPENAI_API_KEY", "").strip()
+def photo_api_key(*, use_qwen):
+    if use_qwen:
+        key = os.environ.get("DASHSCOPE_API_KEY", "").strip()
         if not key:
             try:
-                key = st.secrets.get("OPENAI_API_KEY", "").strip()
+                key = st.secrets.get("DASHSCOPE_API_KEY", "").strip()
             except StreamlitSecretNotFoundError:
                 pass
         if not key:
@@ -80,9 +80,13 @@ def input_draft(public_demo=False):
         st.caption("修改描述后，点击「查找食物」更新待确认的项目。")
         return None
 
-    api_key = photo_api_key(public_demo)
+    use_qwen = public_demo or bool(os.environ.get("DASHSCOPE_API_KEY", "").strip())
+    provider = "Qwen4-Max" if use_qwen else "OpenAI"
+    api_key = photo_api_key(use_qwen=use_qwen)
     if not api_key:
         return None
+    if use_qwen:
+        st.caption("点击识别时，这张照片会发送给阿里云百炼北京区的 Qwen4-Max。")
     upload = st.file_uploader("选择餐食照片", type=["jpg", "jpeg", "png"], max_upload_size=8)
     if upload is None:
         return None
@@ -96,28 +100,28 @@ def input_draft(public_demo=False):
         st.error(str(exc))
         return None
     st.image(preview, width=235)
-    if st.button("发送照片给 OpenAI 识别"):
+    if st.button(f"发送照片给 {provider} 识别"):
         from openai import AuthenticationError, OpenAIError, PermissionDeniedError, RateLimitError
 
         try:
             with st.spinner("正在匹配照片与食物表…"):
-                current = identify_photo(preview, upload.name, FOODS, api_key=api_key)
+                current = identify_photo(preview, upload.name, FOODS, api_key=api_key, use_qwen=use_qwen)
             current["photo_hash"] = photo_hash
             st.session_state.draft = current
         except ValueError:
             st.error("识别结果格式有误，请重试或按菜名查表。")
             return None
         except AuthenticationError:
-            st.error("OpenAI 未接受这个密钥。请由应用维护者检查 API Key。")
+            st.error(f"{provider} 未接受这个密钥。请由应用维护者核对 API Key 和接入地域。")
             return None
         except PermissionDeniedError:
-            st.error("请检查这个 Key 所属项目的模型访问权限及 Responses API 调用权限。")
+            st.error(f"请由应用维护者检查这个 Key 对 {provider} 的模型访问权限和账户计费状态。")
             return None
         except RateLimitError as exc:
             if exc.code == "insufficient_quota":
-                st.error("这个 OpenAI API 项目的可用额度不足，请检查该项目的 API 计费设置。")
+                st.error(f"{provider} 的可用 API 额度不足，请由应用维护者检查计费设置。")
             else:
-                st.error("已达到 OpenAI API 的请求限制，请稍后再试。")
+                st.error(f"已达到 {provider} 的请求限制，请稍后再试。")
             return None
         except OpenAIError:
             st.error("模型请求失败，请检查网络、模型权限和 API 额度，或按菜名查表。")

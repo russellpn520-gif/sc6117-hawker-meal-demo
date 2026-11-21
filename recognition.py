@@ -31,7 +31,7 @@ def prepare_photo(photo):
     return encoded.getvalue()
 
 
-def identify_photo(jpeg, filename, foods, *, api_key=None):
+def identify_photo(jpeg, filename, foods, *, api_key=None, use_qwen=False):
     menu = "\n".join(f"{food.food_id} = {food.name} ({food.source_name})" for food in foods.values())
     instructions = (
         "Help a diner identify visible foods for confirmation. Only return food IDs from the "
@@ -39,14 +39,22 @@ def identify_photo(jpeg, filename, foods, *, api_key=None):
         "never both. Put unsupported or ambiguous items in uncertain_items. Do not infer "
         "grams or calories. The diner will confirm the portions.\n" + menu
     )
-    model_name = os.environ.get("TRACK3_MODEL") or "gpt-5.4-mini"
-    model = ChatOpenAI(model=model_name, api_key=api_key, use_responses_api=True, timeout=35,
-                       max_retries=0, store=False)
+    if use_qwen:
+        model_name = "qwen4-max"
+        model = ChatOpenAI(model=model_name, api_key=api_key,
+                           base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+                           use_responses_api=False, extra_body={"enable_thinking": False},
+                           timeout=60, max_retries=0)
+    else:
+        model_name = os.environ.get("TRACK3_MODEL") or "gpt-5.4-mini"
+        model = ChatOpenAI(model=model_name, api_key=api_key, use_responses_api=True,
+                           timeout=35, max_retries=0, store=False)
     reader = model.with_structured_output(MealPhoto, method="json_schema", strict=True, include_raw=True)
     data = base64.b64encode(jpeg).decode("ascii")
     response = reader.invoke([
         ("system", instructions),
-        ("human", [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{data}"}}]),
+        ("human", [{"type": "text", "text": "Identify the visible foods using the menu."},
+                   {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{data}"}}]),
     ])
     result = response["parsed"]
     if not isinstance(result, MealPhoto):
