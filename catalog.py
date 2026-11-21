@@ -97,26 +97,22 @@ class Catalog(dict):
         direct = self.exact_food(english, chinese)
         if direct:
             return direct
-        # Allow reordered names (e.g. "cooked couscous") and a single extra
-        # qualifier. Leave broader or conflicting recipes for the diner to pick.
+        # Reordered names are fine. A different variety, cooking method or
+        # ingredient changes the reference and needs the diner's confirmation.
         query = terms(normalize(english))
         if len(query) < 2:
             return None
         nearby = set.intersection(*(self.index.get(word, set()) for word in query))
-        ranked = []
+        matches = []
         for key in nearby:
             if self[key].source == "gyg-au":
                 continue
             for label in self.labels[key]:
                 tokens = terms(label)
-                if query <= tokens and len(tokens - query) <= 1:
-                    ranked.append((len(tokens - query), self.priority(key), key))
+                if query <= tokens and tokens - query <= {"nfs"}:
+                    matches.append(key)
                     break
-        if ranked:
-            ranked.sort()
-            if ranked[0][0] == 0 or len(ranked) == 1:
-                return ranked[0][2]
-        return None
+        return min(matches, key=self.priority, default=None)
 
     def search(self, query, limit=18):
         query = normalize(query)
@@ -135,8 +131,14 @@ class Catalog(dict):
             return (key not in exact, -hits[key], min(contained, default=10000), *self.priority(key))
         return tuple(sorted(hits, key=score)[:limit])
 
-@lru_cache(maxsize=1)
 def load_foods():
+    paths = (ROOT / "foods.csv", ROOT / "data/catalog.csv", ROOT / "data/aliases.csv")
+    stats = [path.stat() for path in paths]
+    return _read_foods(tuple((s.st_mtime_ns, s.st_size) for s in stats))
+
+
+@lru_cache(maxsize=1)
+def _read_foods(revision):
     with (ROOT / "data/aliases.csv").open(encoding="utf-8", newline="") as fh:
         custom = {r["food_id"]: r for r in csv.DictReader(fh)}
     foods = []

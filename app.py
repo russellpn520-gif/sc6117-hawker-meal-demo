@@ -16,7 +16,6 @@ from plan_ui import calendar_for_view, day_summary, profile_form, settings, trai
 from planning import calorie_balance, day_plan
 
 
-FOODS = load_foods()
 EXAMPLE = "白饭、水煮鸡"
 
 
@@ -71,7 +70,7 @@ def input_draft(public_demo=False):
         text = st.text_input("这餐吃了什么？", value=EXAMPLE, max_chars=400,
                              help="用顿号分隔。例如「半份白饭、蒸鱼、水煮蛋」或「白饭 90g、水煮鸡」。")
         if st.button("查找食物", disabled=not text.strip()):
-            current = match_text(text.strip(), FOODS)
+            current = match_text(text.strip(), load_foods())
             st.session_state.draft = current
         if current["input"]["method"] == "text" and current["input"]["description"] == text.strip():
             return current
@@ -109,7 +108,7 @@ def input_draft(public_demo=False):
 
         try:
             with st.spinner("正在匹配照片与食物表…"):
-                current = identify_photo(preview, upload.name, FOODS, api_key=api_key, use_qwen=use_qwen,
+                current = identify_photo(preview, upload.name, load_foods(), api_key=api_key, use_qwen=use_qwen,
                                          portion_hint=hint)
             current["photo_hash"] = photo_hash
             st.session_state.draft = current
@@ -150,7 +149,8 @@ def set_photo_size(view, ranges, suggested):
 
 
 def apply_net_weight(view, selected, suggested):
-    served = {k: st.session_state.get(f"grams-{view}-{k}", suggested.get(k, FOODS[k].serving_g))
+    foods = load_foods()
+    served = {k: st.session_state.get(f"grams-{view}-{k}", suggested.get(k, foods[k].serving_g))
               for k in selected}
     for k, g in allocate_grams(served, st.session_state[f"net-{view}"], minimum=1).items():
         st.session_state[f"grams-{view}-{k}"] = g
@@ -164,6 +164,7 @@ def show_token_usage(original):
 
 
 def edit_meal(draft, db_path=None):
+    foods = load_foods()
     original = dict(draft["input"])
     view = draft["id"]
     if variants := draft.get("variants"):
@@ -179,26 +180,26 @@ def edit_meal(draft, db_path=None):
     unknown = original["unmatched"]
     acknowledged = True
     if unknown:
-        st.warning("待核对或超出食物表的项目：" + "、".join(unknown))
+        st.warning("请核对：" + "、".join(unknown))
         acknowledged = st.checkbox("我已核对，只将下方选中的项目计入这餐。", key=f"ack-{view}")
-    search = st.text_input("搜索或补充食物", placeholder=f"{len(FOODS):,} 条 · 试试黑豆、falafel、sushi",
-                           help=f"查找 {len(FOODS):,} 条食物与餐品参考记录。", key=f"lookup-{view}")
+    search = st.text_input("搜索或补充食物", placeholder=f"{len(foods):,} 条 · 试试黑豆、falafel、sushi",
+                           help=f"查找 {len(foods):,} 条食物与餐品参考记录。", key=f"lookup-{view}")
     select_key = f"foods-{view}"
     options = [*st.session_state.get(select_key, []), *suggested]
     if search.strip():
-        matches = FOODS.search(search)
+        matches = foods.search(search)
         options.extend(matches)
         if not matches:
             st.caption("暂未找到，试试英文菜名或单独搜索配料。")
     else:
         options.extend(original.get("alternatives", ()))
         for word in unknown[:3]:
-            options.extend(FOODS.search(word, 4))
+            options.extend(foods.search(word, 4))
         options.extend(["white-rice", "boiled-chicken", "boiled-egg", "fdc-2708555", "fdc-2707359",
                         "fdc-2709307", "fdc-2709738", "fdc-2708202"])
     selected = st.multiselect(
         "核对食物，可补选或移除", options=list(dict.fromkeys(options)), default=list(suggested),
-        format_func=lambda k: f"{FOODS[k].name} · {FOODS[k].source_label}", key=select_key,
+        format_func=lambda k: f"{foods[k].name} · {foods[k].source_label}", key=select_key,
     )
     if not selected:
         st.info("请从食物表中选择至少一项。")
@@ -219,7 +220,7 @@ def edit_meal(draft, db_path=None):
                       args=(view, selected, suggested), disabled=measured is None)
     weights = {}
     for food_id in selected:
-        food = FOODS[food_id]
+        food = foods[food_id]
         quantity_key = f"grams-{view}-{food_id}"
         if quantity_key not in st.session_state:
             st.session_state[quantity_key] = suggested.get(food_id, food.serving_g)
@@ -244,7 +245,7 @@ def edit_meal(draft, db_path=None):
                                  default=1.0, key=f"eaten-{view}") or 1.0
     total_eaten = max(1, round(sum(weights.values()) * share))
     actual = {k: g for k, g in allocate_grams(weights, total_eaten).items() if g}
-    items = portion_items(FOODS, actual)
+    items = portion_items(foods, actual)
     st.caption(f"盘中合计 {sum(weights.values())} g · 本次计入 {sum(actual.values())} g")
     totals = total_nutrients([item["nutrients"] for item in items])
     with st.container(key="meal_totals"):
@@ -321,7 +322,7 @@ def main(*, public_demo=False):
         st.session_state.pop("saved")
         st.session_state.pop("draft", None)
     if "draft" not in st.session_state:
-        st.session_state.draft = match_text(EXAMPLE, FOODS)
+        st.session_state.draft = match_text(EXAMPLE, load_foods())
     records = list_meals(today, db_path=db_path)
     if profile:
         days = calendar_for_view(profile, today, db_path)
@@ -347,7 +348,7 @@ def main(*, public_demo=False):
                 st.success("已记入今天的餐食日志。")
             if st.button("再记一餐"):
                 st.session_state.saved = False
-                st.session_state.draft = match_text(EXAMPLE, FOODS)
+                st.session_state.draft = match_text(EXAMPLE, load_foods())
                 st.rerun()
         else:
             draft = input_draft(public_demo)

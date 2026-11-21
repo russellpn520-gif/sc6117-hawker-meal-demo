@@ -85,7 +85,7 @@ def resolve_photo(result, foods, filename):
                 if key not in grams:
                     ranges[key] = bounds
                 elif bounds and ranges[key]:
-                    ranges[key] = [a + b for a, b in zip(ranges[key], bounds)]
+                    ranges[key] = [min(3000, a + b) for a, b in zip(ranges[key], bounds)]
                 else:
                     ranges[key] = None
                 grams[key] = sum_g
@@ -121,8 +121,10 @@ def identify_photo(jpeg, filename, foods, *, api_key=None, use_qwen=False, porti
         "Identify plated foods from ANY cuisine in English and Chinese for a searchable nutrition database. "
         "Give a common dish name (e.g. burrito bowl), plus recognizable components separately. Group visible "
         "toppings with their dish. Count a separate side, e.g. chips alongside a bowl, as its own dish, "
-        "even in the same container. Do not repeat components as separate dishes. "
-        "Use generic names; brand logos do not establish recipe, market, size or meat type. "
+        "even in the same container. Exclude the separate side's weight from the main dish. "
+        "Do not repeat components as separate dishes. "
+        "Use generic names when the image cannot distinguish the variety, e.g. shredded cheese or cooked meat chunks. "
+        "Brand logos do not establish recipe, market, size or meat type. "
         "Estimate edible mass as a plausible low/high gram range, for the WHOLE dish and separately for each "
         "visible component. Use relative area, depth, item counts, the container and any diner-supplied scale. "
         "Widen ranges when scale/depth is unclear. Use 0,0 if there is no defensible estimate. "

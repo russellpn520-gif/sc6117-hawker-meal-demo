@@ -32,6 +32,9 @@ class FoodCatalogTests(unittest.TestCase):
         self.assertEqual(match_text("半份白饭、水煮鸡",self.foods)["input"]["suggested_grams"],{"white-rice":90,"boiled-chicken":90})
 
     def test_photo_sizes_alternatives_and_unknowns(self):
+        self.assertEqual(self.foods.photo_match("shredded cheese", "奶酪丝"), "fdc-2705704")
+        self.assertEqual(self.foods.photo_match("grilled meat chunks", "烤肉块"), "fdc-2705819")
+        self.assertEqual(self.foods.photo_match("cheddar cheese", "切达奶酪"), "fdc-2705709")
         parts=[seen("black beans","黑豆",40,80), seen("guacamole","牛油果酱",15,35),
                seen("tomato salsa","番茄莎莎",15,45),seen("cooked white rice","白饭",100,160)]
         side = Dish(whole=seen("tortilla chips","玉米脆片",15,25),parts=[])
