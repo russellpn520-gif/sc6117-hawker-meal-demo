@@ -10,7 +10,7 @@ from streamlit.errors import StreamlitSecretNotFoundError
 from api_credentials import read_api_key, save_windows_key
 from device_diary import cloud_diary
 from meals import (
-    SG_TIME, get_profile, list_meals, load_foods, match_text, portion_items, save_meal, total_nutrients,
+    SG_TIME, allocate_grams, get_profile, list_meals, load_foods, match_text, portion_items, save_meal, total_nutrients,
 )
 from plan_ui import calendar_for_view, day_summary, profile_form, settings, training_plan
 from planning import calorie_balance, day_plan
@@ -101,12 +101,16 @@ def input_draft(public_demo=False):
         st.error(str(exc))
         return None
     st.image(preview, width=235)
+    with st.expander("补充份量线索（选填）"):
+        hint = st.text_input("秤重、碗盘直径或包装净重", max_chars=150,
+                             placeholder="例如：碗口约 15 cm，或这盒净重 400 g", key=f"scale-{photo_hash}")
     if st.button(f"发送照片给 {provider} 识别"):
         from openai import AuthenticationError, OpenAIError, PermissionDeniedError, RateLimitError
 
         try:
             with st.spinner("正在匹配照片与食物表…"):
-                current = identify_photo(preview, upload.name, FOODS, api_key=api_key, use_qwen=use_qwen)
+                current = identify_photo(preview, upload.name, FOODS, api_key=api_key, use_qwen=use_qwen,
+                                         portion_hint=hint)
             current["photo_hash"] = photo_hash
             st.session_state.draft = current
         except ValueError:
@@ -137,6 +141,21 @@ def set_grams(key, weight):
     st.session_state[key] = weight
 
 
+def set_photo_size(view, ranges, suggested):
+    choice = st.session_state.get(f"size-{view}")
+    for food_id, bounds in ranges.items():
+        if bounds:
+            values = {"偏小": bounds[0], "按照片估计": suggested[food_id], "偏大": bounds[1]}
+            st.session_state[f"grams-{view}-{food_id}"] = values.get(choice, suggested[food_id])
+
+
+def apply_net_weight(view, selected, suggested):
+    served = {k: st.session_state.get(f"grams-{view}-{k}", suggested.get(k, FOODS[k].serving_g))
+              for k in selected}
+    for k, g in allocate_grams(served, st.session_state[f"net-{view}"], minimum=1).items():
+        st.session_state[f"grams-{view}-{k}"] = g
+
+
 def show_token_usage(original):
     usage = original.get("token_usage")
     if usage:
@@ -145,18 +164,41 @@ def show_token_usage(original):
 
 
 def edit_meal(draft, db_path=None):
-    original = draft["input"]
+    original = dict(draft["input"])
+    view = draft["id"]
+    if variants := draft.get("variants"):
+        choice = st.segmented_control("这份餐怎么记？", list(variants), default="整道菜",
+                                      key=f"variant-{view}") or "整道菜"
+        original.update(variants[choice], portion_mode=choice)
+        view += "-" + choice
+        st.caption("整道菜已包含碗内配料，另点的小食可以另外记录。")
     suggested = original["suggested_grams"]
-    if original.get("question"):
-        st.info(original["question"])
+    photo = original["method"] == "photo"
+    if photo:
+        st.caption(original.get("portion_note") or "照片份量为估计，可按实际重量调整。")
     unknown = original["unmatched"]
     acknowledged = True
     if unknown:
         st.warning("待核对或超出食物表的项目：" + "、".join(unknown))
-        acknowledged = st.checkbox("我已核对，只将下方选中的项目计入这餐。", key=f"ack-{draft['id']}")
+        acknowledged = st.checkbox("我已核对，只将下方选中的项目计入这餐。", key=f"ack-{view}")
+    search = st.text_input("搜索或补充食物", placeholder=f"{len(FOODS):,} 条 · 试试黑豆、falafel、sushi",
+                           help=f"查找 {len(FOODS):,} 条食物与餐品参考记录。", key=f"lookup-{view}")
+    select_key = f"foods-{view}"
+    options = [*st.session_state.get(select_key, []), *suggested]
+    if search.strip():
+        matches = FOODS.search(search)
+        options.extend(matches)
+        if not matches:
+            st.caption("暂未找到，试试英文菜名或单独搜索配料。")
+    else:
+        options.extend(original.get("alternatives", ()))
+        for word in unknown[:3]:
+            options.extend(FOODS.search(word, 4))
+        options.extend(["white-rice", "boiled-chicken", "boiled-egg", "fdc-2708555", "fdc-2707359",
+                        "fdc-2709307", "fdc-2709738", "fdc-2708202"])
     selected = st.multiselect(
-        "核对食物，可补选或移除", options=list(FOODS), default=list(suggested),
-        format_func=lambda food_id: FOODS[food_id].name, key=f"foods-{draft['id']}",
+        "核对食物，可补选或移除", options=list(dict.fromkeys(options)), default=list(suggested),
+        format_func=lambda k: f"{FOODS[k].name} · {FOODS[k].source_label}", key=select_key,
     )
     if not selected:
         st.info("请从食物表中选择至少一项。")
@@ -164,28 +206,54 @@ def edit_meal(draft, db_path=None):
     if "chicken-rice-plate" in selected:
         st.caption("「鸡饭（整盘）」的克数包含鸡肉和油饭。半份整盘与单独减少米饭是两种份量。")
 
+    ranges = original.get("portion_ranges", {})
+    if photo and any(ranges.get(k) for k in selected):
+        st.segmented_control("照片里的份量", ["偏小", "按照片估计", "偏大"], default="按照片估计",
+                             key=f"size-{view}", on_change=set_photo_size, args=(view, ranges, suggested),
+                             help="偏小和偏大分别取估算范围的两端。知道克数时可以直接修改。")
+    if photo:
+        with st.expander("我知道整份净重"):
+            measured = st.number_input("食物净重（克，不含容器）", min_value=len(selected), max_value=3000,
+                                       value=None, step=1, key=f"net-{view}", placeholder="例如 420")
+            st.button("按当前比例分配净重", key=f"apply-net-{view}", on_click=apply_net_weight,
+                      args=(view, selected, suggested), disabled=measured is None)
     weights = {}
     for food_id in selected:
         food = FOODS[food_id]
-        quantity_key = f"grams-{draft['id']}-{food_id}"
+        quantity_key = f"grams-{view}-{food_id}"
         if quantity_key not in st.session_state:
             st.session_state[quantity_key] = suggested.get(food_id, food.serving_g)
         with st.container(key=f"portion_row_{food_id}"):
             name, amount, shortcut = st.columns([1.5, 1, 0.7], gap="small", vertical_alignment="center")
             name.markdown(f"**{food.name}**")
-            name.caption(f"标准一份 {food.serving_g} g")
+            bounds = original.get("portion_ranges", {}).get(food_id)
+            if photo and bounds:
+                name.caption(f"照片估计 {bounds[0]}–{bounds[1]} g")
+            elif photo and food_id in suggested:
+                name.caption(f"缺少尺度，暂用参考量 {food.serving_g} g")
+            elif food.portion_label:
+                name.caption(f"{'参考份量' if photo else food.portion_label} {food.serving_g} g")
+            else:
+                name.caption("按 100 g 查表，请调整实际份量")
             weights[food_id] = amount.number_input(f"{food.name}重量（克）", min_value=1,
                                                    max_value=3000, key=quantity_key)
-            shortcut.button("半份", key=f"half-{draft['id']}-{food_id}",
-                            on_click=set_grams, args=(quantity_key, food.serving_g // 2))
-    items = portion_items(FOODS, weights)
+            shortcut.button("半份", key=f"half-{view}-{food_id}", on_click=set_grams,
+                            args=(quantity_key, max(1, round(suggested.get(food_id, food.serving_g) / 2))))
+    shares = {1.0: "全部", 0.75: "约 ¾", 0.5: "一半", 0.25: "约 ¼"}
+    share = st.segmented_control("这份餐实际吃了多少？", list(shares), format_func=shares.get,
+                                 default=1.0, key=f"eaten-{view}") or 1.0
+    total_eaten = max(1, round(sum(weights.values()) * share))
+    actual = {k: g for k, g in allocate_grams(weights, total_eaten).items() if g}
+    items = portion_items(FOODS, actual)
+    st.caption(f"盘中合计 {sum(weights.values())} g · 本次计入 {sum(actual.values())} g")
     totals = total_nutrients([item["nutrients"] for item in items])
     with st.container(key="meal_totals"):
         kcal, protein = st.columns(2)
         kcal.metric("这餐热量", f"{totals['kcal']:.0f} kcal")
         protein.metric("这餐蛋白质", f"{totals['protein_g']:.1f} g")
     if st.button("确认并记入今天", type="primary", width="stretch", disabled=not acknowledged):
-        save_meal(draft, items, db_path=db_path)
+        original.update(served_grams=weights, eaten_fraction=share)
+        save_meal({**draft, "input": original}, items, db_path=db_path)
         st.session_state.saved = datetime.now(SG_TIME).date()
         st.rerun()
     with st.expander("查看食物数值与来源"):
@@ -196,7 +264,7 @@ def edit_meal(draft, db_path=None):
             st.markdown(
                 f"**{item['name']}** · 每 {item['reference_g']} g 含 {ref['kcal']:g} kcal，"
                 f"蛋白质 {ref['protein_g']:g} g，碳水 {ref['carb_g']:g} g，脂肪 {ref['fat_g']:g} g。"
-                f" [HPB 附表 A · {item['source_name']}]({item['source_url']})"
+                f" [{item['source_label']} · {item['source_code']}]({item['source_url']})"
             )
 
 
@@ -215,6 +283,9 @@ def show_history(records):
             original = record["input"]
             st.text(("查表输入" if original["method"] == "text" else "照片文件") + " · " + original["description"])
             show_token_usage(original)
+            if original.get("served_grams"):
+                st.caption(f"盘中合计 {sum(original['served_grams'].values())} g，"
+                           f"实际计入 {original.get('eaten_fraction', 1):.0%}。")
             if original["unmatched"]:
                 st.text("原始输入中待核对的项目 · " + "、".join(original["unmatched"]))
             for item in items:

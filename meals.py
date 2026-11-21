@@ -1,51 +1,17 @@
-import csv
 import json
 import os
 import re
 import sqlite3
 from contextlib import closing
-from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
 from planning import Profile
+from catalog import NUTRIENTS, ROOT, load_foods
 
 
-ROOT = Path(__file__).resolve().parent
 SG_TIME = timezone(timedelta(hours=8))
-SOURCE = (
-    "https://isomer-user-content.by.gov.sg/484/d2884b81-4dfc-4a9e-b153-1487969794d5/"
-    "obesity-cpg_main_for-online-30-aug.pdf"
-)
-NUTRIENTS = ("kcal", "protein_g", "carb_g", "fat_g")
-
-
-@dataclass(frozen=True)
-class Food:
-    food_id: str
-    name: str
-    source_name: str
-    aliases: tuple[str, ...]
-    serving_g: int
-    nutrients: dict[str, float]
-    page: int
-
-    @property
-    def source_url(self):
-        return f"{SOURCE}#page={self.page + 7}"
-
-
-def load_foods():
-    with (ROOT / "foods.csv").open(encoding="utf-8", newline="") as file:
-        return {
-            row["food_id"]: Food(
-                row["food_id"], row["name"], row["source_name"],
-                tuple(row["aliases"].split("|")), int(row["serving_g"]),
-                {key: float(row[key]) for key in NUTRIENTS}, int(row["source_page"]),
-            )
-            for row in csv.DictReader(file)
-        }
 
 
 def make_draft(method, description, suggested, unmatched):
@@ -58,11 +24,15 @@ def make_draft(method, description, suggested, unmatched):
 
 def match_text(text, foods):
     """Match listed dish names. Accept an optional weight or a half portion per item."""
-    aliases = {alias.casefold(): food for food in foods.values()
-               for alias in (food.name, *food.aliases)}
     grams = {}
     unknown = []
-    for entry in re.split(r"[、，,；;＋+\n]", text):
+    # Database names may themselves contain a comma (e.g. "Salsa, red").
+    entries = re.split(r"[、，；;＋+\n]", text)
+    parts = []
+    for entry in entries:
+        raw_name = re.sub(r"\s*\d+\s*(?:g|克)\s*$", "", entry.strip(), flags=re.I).removeprefix("半份").strip()
+        parts.extend([entry] if foods.exact_food(raw_name) else entry.split(","))
+    for entry in parts:
         entry = entry.strip()
         if not entry:
             continue
@@ -73,10 +43,11 @@ def match_text(text, foods):
         half = name.startswith("半份") or name.endswith("半份")
         if half:
             name = name.removeprefix("半份").removesuffix("半份").strip()
-        food = aliases.get(name.casefold())
-        if food is None or (weight and half):
+        key = foods.exact_food(name)
+        if key is None or (weight and half):
             unknown.append(entry)
             continue
+        food = foods[key]
         amount = int(weight[1]) if weight else food.serving_g // (2 if half else 1)
         combined = grams.get(food.food_id, 0) + amount
         if not 1 <= amount <= 3000 or combined > 3000:
@@ -95,9 +66,10 @@ def portion_items(foods, grams):
         food = foods[food_id]
         items.append({
             "food_id": food_id, "name": food.name, "confirmed_g": weight,
-            "reference_g": food.serving_g, "reference_nutrients": food.nutrients,
+            "reference_g": food.reference_g, "reference_nutrients": food.nutrients,
             "source_name": food.source_name, "source_url": food.source_url,
-            "nutrients": {key: value * weight / food.serving_g
+            "source_label": food.source_label, "source_code": food.code,
+            "nutrients": {key: value * weight / food.reference_g
                           for key, value in food.nutrients.items()},
         })
     return items
@@ -105,6 +77,23 @@ def portion_items(foods, grams):
 
 def total_nutrients(rows):
     return {key: sum(row[key] for row in rows) for key in NUTRIENTS}
+
+
+def allocate_grams(weights, total, minimum=0):
+    """Round proportional amounts to whole grams while preserving the given total."""
+    remaining = total - minimum * len(weights)
+    if not weights or remaining < 0:
+        raise ValueError("总重不足以分配给所选项目。")
+    ratios = {k: max(0, v - minimum) for k, v in weights.items()}
+    if not any(ratios.values()):
+        ratios = dict.fromkeys(weights, 1)
+    denominator = sum(ratios.values())
+    divisions = {k: divmod(v * remaining, denominator) for k, v in ratios.items()}
+    grams = {k: minimum + q for k, (q, _) in divisions.items()}
+    ordered = sorted(grams, key=lambda k: divisions[k][1], reverse=True)
+    for k in ordered[:total - sum(grams.values())]:
+        grams[k] += 1
+    return grams
 
 
 def open_db(db_path=None):

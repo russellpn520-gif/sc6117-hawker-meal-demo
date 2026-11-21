@@ -1,15 +1,15 @@
 # 食阁记餐 · SC6117 Track 3 Demo
 
-这版给在食阁吃饭的组员试用。首次填写年龄、身高、体重和运动习惯即可建立个人计划。确认每餐份量后，首页会更新今日热量和蛋白质余量。训练改期会重新计算相应日期的目标。
+拍照或输入菜名，查询多地区食材和菜品，再按实际吃下的重量记餐。首次填写年龄、身高、体重和运动习惯即可建立个人计划。首页会更新今日热量和蛋白质余量，训练改期会重新计算相应日期的目标。
 
 [打开食阁记餐](https://sc6117-hawker-meal.streamlit.app/) · [保存可转发的手机二维码](https://raw.githubusercontent.com/russellpn520-gif/sc6117-hawker-meal-demo/main/assets/demo-qr.png)
 
-## 两个主要来源
+## 两类数据来源
 
-1. **这餐吃了多少。** 新加坡保健促进局和卫生部《肥胖临床实践指南》（2016）附表 A 提供本地食物每标准份的重量、热量、蛋白质、碳水和脂肪。Demo 收录其中 9 项，按用餐者确认的克数换算。[附表 A，第 101–102 页](https://isomer-user-content.by.gov.sg/484/d2884b81-4dfc-4a9e-b153-1487969794d5/obesity-cpg_main_for-online-30-aug.pdf#page=108) · [项目食物表](foods.csv)
+1. **每餐营养**来自 USDA、英国 CoFID、台湾食药署、FAO/INFOODS 西非食物表、新加坡官方与实测数据，以及注明市场的厂商菜单。共 19,115 条，按实际吃下的克数换算。[来源、数量与原表](data/SOURCES.md)
 2. **一天需要多少。** Mifflin–St Jeor 成人静息能量消耗公式（1990）根据年龄、身高、体重和性别系数估算静息代谢。Demo 再结合活动量和训练日程设置每日热量目标。[公式原文](https://pubmed.ncbi.nlm.nih.gov/2305711/) · [项目计算代码](planning.py)
 
-运动档位另参考 Cronometer 和 Polar，蛋白质与活动建议参考新加坡 HealthHub。各项依据和演示用的热量分配比例见下方「个人计划怎么算」。Qwen4-Max 负责从照片中提出候选菜名，营养数值来自食物表。
+运动档位另参考 Cronometer 和 Polar，蛋白质与活动建议参考新加坡 HealthHub。各项依据和演示用的热量分配比例见下方「个人计划怎么算」。Qwen4-Max 从照片中识别菜品，并根据可见的容器、食物面积、厚度或数量给出粗略克数范围。营养值由程序查表计算。
 
 ## 手机访问与协作
 
@@ -36,7 +36,7 @@ uv run streamlit run app.py --server.address 127.0.0.1 --server.port 8617
 
 ## Streamlit Community Cloud
 
-部署使用 `main` 分支、入口 `cloud_app.py` 和 Python 3.12。iPhone 用相机扫描原二维码，点弹出的链接即可在 Safari 使用。默认每个浏览器会话有独立日志。勾选「在这台设备记住我的记录」后，同一浏览器可凭本地随机标识跨会话找回个人档案和餐食；清除浏览器数据会失去入口，Community Cloud 重置临时磁盘也会清空记录。可从「个人设置与估算依据」清除自己的全部数据。二维码只包含公开应用网址。模型只接收待识别的餐食图片和食物匹配指令。
+部署使用 `main` 分支、入口 `cloud_app.py` 和 Python 3.12。iPhone 用相机扫描原二维码，点弹出的链接即可在 Safari 使用。默认每个浏览器会话有独立日志。勾选「在这台设备记住我的记录」后，同一浏览器可凭本地随机标识跨会话找回个人档案和餐食；清除浏览器数据会失去入口，Community Cloud 重置临时磁盘也会清空记录。可从「个人设置与估算依据」清除自己的全部数据。二维码只包含公开应用网址。识别请求包含餐食图片、可选份量线索和识别指令。
 
 维护者在应用的 **Settings → Secrets** 设置顶层 `DASHSCOPE_API_KEY`。每次点击发送照片，服务器会调用百炼北京区。访客共用服务端密钥，调用按对应百炼工作空间的额度和价格结算。更换密钥只需更新 Secrets。维护者把代码推送至已部署的分支后，同一网址会自动更新。[百炼地域与接入地址](https://www.alibabacloud.com/help/en/model-studio/base-url) · [Streamlit 更新说明](https://docs.streamlit.io/deploy/streamlit-community-cloud/manage-your-app)
 
@@ -65,7 +65,7 @@ uv run streamlit run app.py --server.address 127.0.0.1 --server.port 8617
 
 ## 数据从哪里来
 
-`foods.csv` 收录 9 条新加坡 HPB–MOH 2016 年附表 A 的参考食物。表中保留英文原名、原始标准份克数、该份热量和三种宏量营养素，并记录印刷页码 101 或 102。数值用于演示估算，真实摊位的烹调和份量会有差异。默认例子是白饭配水煮鸡；「鸡饭（整盘）」有独立条目，改它的克数会按比例缩放整道菜。扩大菜品覆盖时，可使用 HPB 当前提供的 SG FoodID 工具逐条核对，也可为包装食品加入标签来源。[附表 A 原文](https://isomer-user-content.by.gov.sg/484/d2884b81-4dfc-4a9e-b153-1487969794d5/obesity-cpg_main_for-online-30-aug.pdf#page=108) · [SG FoodID](https://www.hpb.gov.sg/healthy-living/food-and-beverage/sgfoodid/)
+数据随应用发布，可离线按中英文检索如寿司、墨西哥饭碗、鹰嘴豆泥、鹰嘴豆咖喱或西班牙海鲜饭。相同菜名的不同做法保留各自出处。相机识别混合餐时可切换「整道菜」和「按配料」，在两种方式间切换会替换对应项目。可选填餐盘直径或包装净重，按照片范围选择偏小或偏大，也可以手动修改盘中克数，再选全部、四分之三、一半或四分之一。最终只计入吃下的重量，缺少尺度时会标出暂用参考量。[完整数据来源](data/SOURCES.md) · [MyFitnessPal 拍照记餐流程](https://support.myfitnesspal.com/hc/en-us/articles/360045761612-How-to-use-the-Meal-Scanner) · [Cronometer 拍照记餐流程](https://support.cronometer.com/hc/en-us/articles/39013533811092-Mobile-Photo-Logging)
 
 ## 数据结构与课堂、GitHub 参考
 
@@ -84,8 +84,8 @@ uv run streamlit run app.py --server.address 127.0.0.1 --server.port 8617
 
 | 对象 | 主要字段及用途 |
 | --- | --- |
-| 食物参考项 | `food_id`、原文名称、`serving_g`、该份的 `kcal/protein_g/carb_g/fat_g`、出处页码。 |
-| 餐食草稿 | UUID、输入方式、原始描述或文件名、建议的食物与克数、未匹配项。建议克数来自菜名中明确提供的重量、半份标记或表内标准份。 |
+| 食物参考项 | 稳定条目标识、原名和别名、营养基准重量、建议份重、四项营养值、来源代码和链接。 |
+| 餐食草稿 | UUID、原始输入、建议条目、未匹配项。照片还带视觉份量范围、可选参照和整道菜或配料的核对方式。确认时保留盘中克数与实际吃下的比例。 |
 | 已确认餐食 | 新加坡日期与确认时间、输入快照、`items[]`、`totals`。每项带 `food_id`、`confirmed_g`、参考份量及参考营养、来源 URL 和折算值。 |
 | 个人资料 | 昵称、年龄、身高、体重、活动档位、可选公式系数、目标、建档日期。 |
 | 训练日期 | 每周模板加按日训练或休息的改动。改期在一个 SQLite 事务中完成，首页实时计算目标及余量。 |

@@ -1,0 +1,115 @@
+food_id,name,aliases
+white-rice,白饭,熟米饭|熟白米饭|白米饭|steamed white rice|cooked white rice|plain white rice|white rice cooked|cooked rice
+fdc-2708555,墨西哥碗（通用参考）,墨西哥碗|墨西哥饭碗|墨西哥卷碗|墨西哥饭|burrito bowl|Mexican rice bowl|Mexican bowl|GYG burrito bowl|Guzman y Gomez burrito bowl|GYG墨西哥碗
+fdc-2708556,牛肉或猪肉墨西哥碗,beef burrito bowl|pork burrito bowl|牛肉碗|牛肉墨西哥碗
+fdc-2708557,牛肉或猪肉墨西哥碗（米饭）,beef burrito bowl with rice|牛肉墨西哥饭碗
+fdc-2708558,牛肉或猪肉墨西哥碗（豆）,beef burrito bowl with beans
+fdc-2708559,牛肉或猪肉墨西哥碗（豆和米饭）,牛肉黑豆墨西哥碗|牛肉豆饭碗|beef burrito bowl with rice and beans|beef burrito bowl with beans and rice|beef and bean burrito bowl with rice
+fdc-2708560,鸡肉墨西哥碗,chicken burrito bowl
+fdc-2708561,鸡肉墨西哥碗（米饭）,chicken burrito bowl with rice
+fdc-2708562,鸡肉墨西哥碗（豆）,chicken burrito bowl with beans
+fdc-2708563,鸡肉墨西哥碗（豆和米饭）,chicken burrito bowl with rice and beans|chicken burrito bowl with beans and rice
+fdc-2708564,豆类墨西哥碗,bean burrito bowl|vegetarian bean bowl
+fdc-2707359,熟黑豆,黑豆|黑豆粒|墨西哥黑豆|black beans|cooked black beans|black turtle beans
+fdc-2705849,炖牛肉块,熟牛肉块|牛肉块|炖牛肉|熟牛肉|beef chunks|cooked beef chunks|stewed beef|braised beef|diced cooked beef
+fdc-2705824,牛排,steak|grilled beef steak|烤牛排
+fdc-2709307,牛油果酱,鳄梨酱|牛油果泥|墨西哥鳄梨酱|guacamole|guac|avocado dip
+fdc-2709308,番茄牛油果酱,guacamole with tomato
+fdc-2709738,番茄莎莎酱,莎莎|番茄莎莎|番茄萨尔萨|莎莎酱|salsa|tomato salsa|red salsa|pico de gallo|鲜番茄莎莎
+fdc-2708202,玉米脆片,玉米片|玉米薯片|墨西哥玉米片|tortilla chips|corn tortilla chips|plain tortilla chips|corn chips
+fdc-2705709,切达奶酪,切达芝士|切达奶酪丝|cheddar cheese|shredded cheddar|cheddar
+fdc-2705722,马苏里拉奶酪,mozzarella|mozzarella cheese
+fdc-2705614,酸奶油,sour cream
+fdc-2709789,生菜,lettuce|沙拉生菜|shredded lettuce
+fdc-2709223,牛油果,鳄梨|avocado
+fdc-2707823,玉米饼,tortilla de maíz|corn tortilla|墨西哥玉米饼
+fdc-2708590,墨西哥芝士烤饼,quesadilla|墨西哥烤饼
+fdc-2708593,鸡肉芝士烤饼,chicken quesadilla
+fdc-2708568,鸡肉墨西哥焗卷,chicken enchilada
+fdc-2705968,去皮烤鸡胸,无酱烤鸡胸肉|烤鸡胸|grilled chicken breast|grilled skinless chicken breast
+fdc-2708959,寿司,sushi|日式寿司
+fdc-2708962,鳗鱼寿司卷,eel sushi roll
+fdc-2708965,金枪鱼寿司卷,tuna sushi roll
+fdc-2708950,韩式拌饭,石锅拌饭|bibimbap|Korean mixed rice
+fdc-2710077,韩式泡菜,kimchi|韩国泡菜
+fdc-2707455,味噌或豆腐汤,味噌汤|miso soup
+fdc-2708804,泰式炒河粉,泰式炒粉|pad thai|phad thai
+fdc-2708805,素泰式炒河粉,vegetarian pad thai
+fdc-2707402,鹰嘴豆泥,hummus|houmous|hummus dip
+fdc-2707408,炸鹰嘴豆丸子,falafel|法拉费|中东炸豆丸
+fdc-2709131,塔布勒沙拉,tabbouleh|tabouli|中东欧芹沙拉
+fdc-2707414,鹰嘴豆,chickpeas|garbanzo beans|煮鹰嘴豆
+fdc-2706437,咖喱鸡,chicken curry|鸡肉咖喱
+fdc-2706438,咖喱鸡饭,chicken curry with rice
+fdc-2706538,印度鸡肉香饭,chicken biryani|鸡肉比尔亚尼饭
+fdc-2708985,印度蔬菜香饭,vegetable biryani
+fdc-2708730,咖喱角,samosa|印度三角饺
+fdc-2707796,埃塞俄比亚英吉拉饼,injera|英吉拉
+fdc-2709568,西非富富团,fufu|富富|木薯团
+fdc-2708441,熟库斯库斯,couscous|北非小米|古斯古斯
+fdc-2706723,西班牙烩饭,paella
+fdc-2706711,西班牙海鲜饭,seafood paella
+fdc-2708750,肉酱千层面,lasagna with meat|meat lasagna|肉酱千层意面
+fdc-2708758,素千层面,vegetarian lasagna|meatless lasagna
+fdc-2708831,番茄酱意面（家常）,番茄意面|番茄酱意大利面|pasta with tomato sauce|spaghetti with tomato sauce
+fdc-2708825,肉酱芝士意面,spaghetti with meat sauce and cheese
+fdc-2706888,芝士汉堡,cheeseburger|奶酪汉堡
+fdc-2706892,麦当劳芝士汉堡（美国调查）,McDonalds cheeseburger|美版麦当劳芝士汉堡
+fdc-2707678,可颂,croissant|牛角面包
+fdc-2708304,原味松饼,pancakes|plain pancakes|美式煎饼
+fdc-172185,煎蛋卷,omelette|omelet|西式蛋卷
+fdc-2709492,土豆泥,马铃薯泥|mashed potato|mashed potatoes
+fdc-2707462,扁豆汤,lentil soup
+fdc-2708414,糙米饭（不加油）,糙米饭|brown rice|cooked brown rice
+fdc-2705385,全脂牛奶,全脂奶|whole milk
+fdc-2705422,全脂原味希腊酸奶,原味希腊酸奶|plain Greek yogurt
+fdc-2707537,花生酱,peanut butter
+fdc-2709224,香蕉,banana|生香蕉
+fdc-2709215,苹果,apple|鲜苹果
+fdc-2709719,生番茄,tomato|fresh tomato|西红柿
+fdc-2707442,酱油,soy sauce
+fdc-2710375,黑咖啡,brewed coffee|black coffee|无糖黑咖啡
+cofid-19-539,土耳其旋转烤肉（仅肉）,doner kebab meat|döner kebab meat
+sgstudy-char-kuay-teow,炒粿条,char kway teow|炒贵刁
+sgstudy-yang-zhou-fried-rice,扬州炒饭,Yangzhou fried rice|扬州蛋炒饭
+sgstudy-fried-carrot-cake,炒萝卜糕,菜头粿
+sgstudy-laska,叻沙,laksa|拉沙
+sgstudy-roti-prata,印度煎饼,roti prata|prata
+sgstudy-nasi-lemak,椰浆饭,nasi lemak|椰漿飯
+sgstudy-mee-siam,米暹,mee siam
+sgstudy-fried-hokkien-mee,福建炒虾面,hokkien mee|福建虾面
+sgstudy-ayam-penyet,印尼炸鸡饭,ayam penyet
+sgstudy-goreng-pisang,炸香蕉,goreng pisang|pisang goreng
+sgstudy-mee-rebus,马来卤面,mee rebus
+sgstudy-original-appam,印度米浆薄饼,appam
+sgstudy-naan,印度烤饼,naan|馕
+fdc-168070,拉美玉米饼阿雷帕,arepa|arepas|阿雷帕
+fdc-2708709,拉美馅饼,empanada|empanadas|恩潘纳达
+fdc-2708711,牛肉恩潘纳达,beef empanada
+fdc-2708609,豆馅普普萨饼,bean pupusa|pupusa with beans
+fdc-2706463,酸橘汁腌鱼,ceviche|cebiche
+fdc-2708570,墨西哥玉米粽,tamale|tamales|塔马利
+fdc-2708514,塔可,taco|tacos|墨西哥夹饼
+fdc-2708534,墨西哥卷饼,burrito|墨西哥卷
+fdc-2709563,大蕉脆片,plantain chips
+fdc-2707124,越南河粉（有肉）,pho with meat|越南牛肉河粉|beef pho
+fdc-2707125,越南河粉（无肉）,vegetarian pho|越南素河粉
+fdc-2709153,日式拉面,ramen|ramen bowl|拉面
+fdc-2709154,牛肉拉面,beef ramen
+fdc-2708708,蒸饺,steamed dumpling|steamed dumplings|蒸肉饺
+fdc-2708705,煎饺,锅贴|fried dumplings|potstickers
+fdc-2708616,芝士披萨（常规饼底）,芝士披萨|奶酪比萨|cheese pizza|margherita pizza|玛格丽特披萨
+fdc-2706920,汉堡,hamburger|牛肉汉堡|burger
+cofid-15-641,家常印度鹰嘴豆咖喱,chickpea dhal|chickpea dal
+fdc-2710186,橄榄油,olive oil
+fdc-2708720,波兰饺子,pierogi
+cofid-19-641,维也纳炸肉排,wiener schnitzel|schnitzel
+fdc-2710472,卡布奇诺,cappuccino
+fdc-2705394,开菲尔,kefir
+fdc-2706139,带皮烤鸭肉,烤鸭肉|北京烤鸭肉|roast duck with skin
+fdc-2706286,烤三文鱼,三文鱼排|烤鲑鱼|grilled salmon|baked salmon|grilled salmon fillet
+fdc-2708381,水煮原味燕麦粥,燕麦粥|porridge oats|plain oatmeal|oatmeal cooked in water
+tfda-R4701201,嫩豆腐,soft tofu|silken tofu|嫩豆腐
+tfda-R5000101,豆浆,豆奶|soy milk|soya milk
+tfda-R2301101,小笼包,xiaolongbao|soup dumplings
+cofid-17-043,芝麻油,香油|sesame oil
