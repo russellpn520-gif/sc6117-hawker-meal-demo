@@ -2,7 +2,20 @@
 
 这版给在食阁吃饭的组员试用。首次填写年龄、身高、体重和运动习惯即可建立个人计划。确认每餐份量后，首页会更新今日热量和蛋白质余量。训练改期会重新计算相应日期的目标。
 
-[打开公开体验版](https://sc6117-hawker-meal.streamlit.app/) · [保存手机二维码](assets/demo-qr.png)
+[打开食阁记餐](https://sc6117-hawker-meal.streamlit.app/) · [保存可转发的手机二维码](https://raw.githubusercontent.com/russellpn520-gif/sc6117-hawker-meal-demo/main/assets/demo-qr.png)
+
+## 两个主要来源
+
+1. **这餐吃了多少。** 新加坡保健促进局和卫生部《肥胖临床实践指南》（2016）附表 A 提供本地食物每标准份的重量、热量、蛋白质、碳水和脂肪。Demo 收录其中 9 项，按用餐者确认的克数换算。[附表 A，第 101–102 页](https://isomer-user-content.by.gov.sg/484/d2884b81-4dfc-4a9e-b153-1487969794d5/obesity-cpg_main_for-online-30-aug.pdf#page=108) · [项目食物表](foods.csv)
+2. **一天需要多少。** Mifflin–St Jeor 成人静息能量消耗公式（1990）根据年龄、身高、体重和性别系数估算静息代谢。Demo 再结合活动量和训练日程设置每日热量目标。[公式原文](https://pubmed.ncbi.nlm.nih.gov/2305711/) · [项目计算代码](planning.py)
+
+运动档位另参考 Cronometer 和 Polar，蛋白质与活动建议参考新加坡 HealthHub。各项依据和演示用的热量分配比例见下方「个人计划怎么算」。Qwen4-Max 负责从照片中提出候选菜名，营养数值来自食物表。
+
+## 手机访问与协作
+
+用 iPhone 相机扫码，或点上方「打开食阁记餐」。如 Safari 提示「此连接非私人连接」，先返回。核对网址和「设置 → 通用 → 日期与时间 → 自动设置」，再用蜂窝数据打开同一网址。若仍有警告，请将警告标题和域名发给维护者，截图时可遮住个人信息。[Apple 的连接安全说明](https://support.apple.com/zh-cn/102279) · [Apple 的网络排查步骤](https://support.apple.com/zh-cn/102456)
+
+这个公共仓库可匿名浏览。组员登录 GitHub 后可点文件页右上角的铅笔，在个人副本中编辑，再通过 Pull Request 把改动提交给项目。直接推送至主分支需要仓库写权限。[编辑项目说明](https://github.com/russellpn520-gif/sc6117-hawker-meal-demo/edit/main/README.md) · [GitHub 网页编辑说明](https://docs.github.com/en/repositories/working-with-files/managing-files/editing-files)
 
 ## 启动
 
