@@ -70,7 +70,7 @@ def _missing_items(original, foods):
     return rows
 
 
-def _resolve_food(view, row, candidate, foods):
+def _resolve_food(view, row, candidate, foods, draft, db_path):
     choices = dict(st.session_state.get(f"{view}-decisions", {}))
     if candidate is not None:
         widget_key = _selection_key(view)
@@ -79,7 +79,7 @@ def _resolve_food(view, row, candidate, foods):
             selected.append(candidate)
             low, high = row.get("low_g", 0), row.get("high_g", 0)
             weight = round((low + high) / 2) if 0 < low <= high <= 3000 else foods[candidate].serving_g
-            st.session_state[f"{view}-grams-{candidate}"] = weight
+            _write_edits(draft, view, db_path, {candidate: weight})
         st.session_state[widget_key] = selected
         st.session_state[f"{view}-selected-ids"] = selected
     choices[row["key"]] = candidate
@@ -194,7 +194,7 @@ def _main_review(panel, original, view, foods):
     return view, decisions
 
 
-def _repair_controls(panel, view, rows, foods, selected, main_dishes=()):
+def _repair_controls(panel, view, rows, foods, selected, main_dishes, draft, db_path):
     decisions = st.session_state.get(f"{view}-decisions", {})
     decisions = {k: v for k, v in decisions.items() if v is None or v in selected}
     st.session_state[f"{view}-decisions"] = decisions
@@ -223,18 +223,18 @@ def _repair_controls(panel, view, rows, foods, selected, main_dishes=()):
                 for k in quick:
                     label = tr(f"对应已选的{food_name(foods[k])}", f"Use selected {food_name(foods[k])}") if k in selected else f"＋ {food_name(foods[k])}"
                     st.button(label, key=f"{controls}-add-{k}", help=source_name(foods[k].source_label),
-                              on_click=_resolve_food, args=(view, row, k, foods))
+                              on_click=_resolve_food, args=(view, row, k, foods, draft, db_path))
             with st.expander(tr("查找其他食物", "Look up another food"), expanded=not quick):
                 query = st.text_input(tr("搜索合适的菜名或食材", "Search for a dish or ingredient"), key=f"{controls}-lookup",
                                       placeholder=tr("例如：蒸鱼、豆腐", "e.g. steamed fish or tofu"))
                 if query.strip():
                     matches = _manual_matches(foods, query)
                     if matches:
-                        _food_results(foods, matches, controls, partial(_resolve_food, view, row, foods=foods))
+                        _food_results(foods, matches, controls, partial(_resolve_food, view, row, foods=foods, draft=draft, db_path=db_path))
                     else:
                         st.caption(tr("暂未搜到，可换个菜名或食材名。", "No matches. Try another dish or ingredient."))
             st.button(tr("这项没吃或不在餐盘里", "I didn't eat this / it wasn't on the plate"), key=f"{controls}-omit", on_click=_resolve_food,
-                      args=(view, row, None, foods))
+                      args=(view, row, None, foods, draft, db_path))
         omitted = [r for r in rows if r["key"] in decisions and decisions[r["key"]] is None]
         for row in rows:
             key = decisions.get(row["key"])
@@ -331,31 +331,18 @@ def _correct_foods(panel, foods, original, view, draft, db_path):
         query = st.text_input(tr("搜索食物", "Search foods"), placeholder=tr("输入菜名或食材", "Enter a dish or ingredient"), key=f"{view}-search")
         selection_key = _selection_key(view)
         stable = f"{view}-selected-ids"
-        baseline = view + "-last-servings"
-        initial = [k for k, g in effective.items() if g > 0 and k in foods]
-        if stable in st.session_state:
-            initial = list(st.session_state.get(selection_key, st.session_state[stable]))
-            previous = st.session_state.get(baseline, {})
-            for key in dict.fromkeys([*previous, *effective]):
-                weight = effective.get(key, 0)
-                if previous.get(key) == effective.get(key):
-                    continue
-                if weight:
-                    if key not in initial:
-                        initial.append(key)
-                    st.session_state[f"{view}-grams-{key}"] = weight
-                elif key in initial:
-                    initial.remove(key)
-            if selection_key in st.session_state and initial != st.session_state[selection_key]:
-                st.session_state[selection_key] = initial
-        st.session_state[baseline] = effective
-        choices = [*suggested, *edits, *initial, *st.session_state.get(selection_key, ())]
+        # Widgets can remount when the language changes. The saved servings
+        # drive both the displayed list and the totals on every run.
+        selected = [k for k, g in effective.items() if g > 0 and k in foods]
+        if selection_key in st.session_state and st.session_state[selection_key] != selected:
+            st.session_state[selection_key] = selected
+        choices = [*suggested, *edits]
         matches = foods.search(query) if query.strip() else original.get("alternatives", [])
         choices.extend(matches)
         options = [key for key in dict.fromkeys(choices) if key in foods]
         labels = {k: f"{food_name(foods[k])} · {source_name(foods[k].source_label)}" for k in options}
-        selected = st.multiselect(
-            tr("这餐有哪些食物？", "Foods in this meal"), options, default=None if selection_key in st.session_state else initial,
+        st.multiselect(
+            tr("这餐有哪些食物？", "Foods in this meal"), options, default=selected,
             format_func=labels.__getitem__,
             placeholder=tr("选择要记入的食物", "Select foods to include"), key=selection_key,
             on_change=_selection_changed, args=(draft, view, db_path,
@@ -379,9 +366,12 @@ def _correct_foods(panel, foods, original, view, draft, db_path):
             bounds = ranges.get(key)
             detail = (tr(f"照片目测约 {bounds[0]}–{bounds[1]} g", f"Estimated {bounds[0]}–{bounds[1]} g from photo") if bounds else
                       tr(f"参考份量 {food.serving_g} g", f"Reference serving: {food.serving_g} g"))
-            weights[key] = st.number_input(
+            weights[key] = effective[key]
+            if widget_key in st.session_state and st.session_state[widget_key] != weights[key]:
+                st.session_state[widget_key] = weights[key]
+            st.number_input(
                 tr(f"{food_name(food)} · 端上来的克数", f"{food_name(food)} · grams served"), min_value=1, max_value=3000, step=1,
-                value=effective.get(key) or suggested.get(key, food.serving_g),
+                value=weights[key],
                 key=widget_key, help=detail,
                 on_change=_save_weights, args=(draft, view, db_path, [key]),
             )
@@ -446,7 +436,7 @@ def review_meal(draft, db_path=None, status_slot=None):
         st.rerun()
     pending, decisions = [], {}
     if rows:
-        pending, decisions = _repair_controls(repair_area, view, rows, foods, weights, original.get("main_dishes", []))
+        pending, decisions = _repair_controls(repair_area, view, rows, foods, weights, original.get("main_dishes", []), draft, db_path)
     with leftovers:
         if weights:
             st.caption(tr("调剩饭比例", "Adjust how much you ate"))

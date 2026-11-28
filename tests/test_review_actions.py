@@ -53,6 +53,27 @@ def test_remove_every_row_undo_and_reopen(tmp_path):
         assert {i["food_id"]: i["confirmed_g"] for i in record["items"]} == {"boiled-egg": 55, "white-rice": 145}
 
 
+def test_widget_remount_cannot_change_saved_foods_or_weights(tmp_path):
+    db = tmp_path / "remount.db"
+    draft = make_ready(db, {"white-rice": 145, "boiled-egg": 55})
+    prefix = "meal-" + draft["id"]
+    with patch("app.cloud_diary", return_value=db):
+        app = AppTest.from_string("from app import main\nmain(public_demo=True)", default_timeout=20)
+        app.query_params["lang"] = "en"
+        app.run()
+        app.button(key=prefix + "-remove-white-rice").click().run()
+        app.button(key=prefix + "-undo-row").click().run()
+        # A Cloud iframe rerun can supply a stale selection or widget default.
+        app.session_state[prefix + "-foods-en"] = ["white-rice"]
+        app.session_state[prefix + "-grams-white-rice"] = 1
+        app.run()
+        assert app.multiselect[0].value == ["white-rice", "boiled-egg"]
+        assert app.number_input(key=prefix + "-grams-white-rice").value == 145
+        app.button(key=prefix + "-confirm").click().run()
+        meal, = list_meals(datetime.now(SG_TIME).date(), db_path=db)
+        assert {row["food_id"]: row["confirmed_g"] for row in meal["items"]} == {"white-rice": 145, "boiled-egg": 55}
+
+
 def test_retake_opens_capture_even_with_another_draft_and_a_saved_meal(tmp_path):
     db = tmp_path / "retake.db"
     saved = make_ready(db, {"boiled-egg": 55})
