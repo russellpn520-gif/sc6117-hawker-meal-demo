@@ -12,6 +12,8 @@ from coach_ui import coach_entry
 from device_diary import cloud_diary
 from i18n import food_name, language_switch, tr
 from meal_review import review_meal
+from meal_memory import suggest_corrections, usual_meals_ui
+from label_ui import review_label
 from meals import (
     SG_TIME, IncompleteMealError, create_pending, discard_pending, get_pending, get_profile, list_meals, list_pending,
     load_foods, make_draft, match_text, save_meal, total_nutrients, update_pending,
@@ -31,11 +33,18 @@ photo_picker = st.components.v2.component(
 
 def capture_meal(db_path, public_demo):
     device = st.session_state.get("diary_token", "session" if public_demo else "local")
-    st.caption(tr("照片由 OpenAI 识别，吃完再确认。", "OpenAI identifies the food in your photo. Confirm after eating."))
+    modes = {"photo": tr("餐盘", "Meal"), "label": tr("包装营养标签", "Nutrition label")}
+    mode = st.segmented_control(tr("拍什么？", "What are you photographing?"), list(modes),
+                                format_func=modes.__getitem__, default="photo", key="capture_mode",
+                                label_visibility="collapsed") or "photo"
+    if mode == "label":
+        st.caption(tr("拍清营养成分表及份量单位，读数后按实吃量确认。", "Photograph the nutrition panel and its serving units, then enter how much you ate."))
+    else:
+        st.caption(tr("照片由 OpenAI 识别，吃完再确认。", "OpenAI identifies the food in your photo. Confirm after eating."))
     if public_demo:
         st.caption(tr("首次使用照片识别需组员访问码。按菜名记餐、日记和训练计划免费使用。",
                       "Your first photo scan requires the team access code. Logging by name, the diary and training plans are free."))
-    result = photo_picker(key="capture_meal", data={"device": device, "ack": st.session_state.get("capture_ack"),
+    result = photo_picker(key="capture_meal", data={"device": device, "mode": mode, "ack": st.session_state.get("capture_ack"),
                                                   "lang": st.session_state.get("ui_lang", "zh")},
                           default={"capture": None}, on_capture_change=lambda: None)
     record = result.capture
@@ -55,8 +64,11 @@ def capture_meal(db_path, public_demo):
             st.session_state.notice = tr("这张照片未能保存，请重新选择。", "Could not save this photo. Please choose it again.")
             st.rerun()
         return
-    draft = make_draft("photo", "餐食照片", {}, [])
+    method = "label" if record.get("mode") == "label" else "photo"
+    draft = make_draft(method, "包装营养标签" if method == "label" else "餐食照片", {}, [])
     draft["input"]["ui_lang"] = st.session_state.get("ui_lang", "zh")
+    if method == "photo" and isinstance(record.get("portion_hint"), str):
+        draft["input"]["portion_hint"] = record["portion_hint"].strip()[:150]
     draft.update(id=key, captured_at=record.get("captured_at"))
     new = create_pending(draft, jpeg, db_path=db_path)
     st.session_state.capture_ack = record["id"]
@@ -95,14 +107,16 @@ def wait_for_recognition(key, db_path, api_key):
 
 
 def review_pending(draft, db_path, public_demo):
+    is_label = draft["input"].get("method") == "label"
     if draft["photo"]:
-        st.image(draft["photo"], width=220, alt=tr("这餐的照片", "Photo of your meal"))
+        st.image(draft["photo"], width="stretch" if is_label else 220,
+                 alt=tr("包装营养标签", "Package nutrition panel") if is_label else tr("这餐的照片", "Photo of your meal"))
     status = draft["status"]
     if status == "queued":
         api_key = photo_api_key(public_demo=public_demo)
         if api_key:
             wait_for_recognition(draft["id"], db_path, api_key)
-        else:
+        elif not is_label:
             text_entry(db_path, draft)
     elif status == "failed":
         st.caption(tr(draft.get("error") or "照片已保存，可重试识别或补填菜名。",
@@ -110,9 +124,12 @@ def review_pending(draft, db_path, public_demo):
         if st.button(tr("重新识别", "Retry recognition"), key="retry-" + draft["id"]):
             update_pending({**draft, "status": "queued"}, db_path=db_path)
             st.rerun()
-        text_entry(db_path, draft)
+        if not is_label:
+            text_entry(db_path, draft)
     else:
-        confirmed = review_meal(draft)
+        if not is_label and draft["input"].get("method") == "photo":
+            suggest_corrections(draft, load_foods(), db_path)
+        confirmed = review_label(draft, db_path) if is_label else review_meal(draft)
         if confirmed:
             payload, items = confirmed
             try:
@@ -128,6 +145,10 @@ def review_pending(draft, db_path, public_demo):
             else:
                 st.session_state.notice = tr("这餐已在另一处处理。", "This meal has already been handled in another tab.")
             st.rerun()
+    if is_label and status in ("queued", "failed"):
+        if st.button(tr("按包装手动填写", "Enter label values manually"), key="manual-label-"+draft["id"]):
+            update_pending({**draft, "status": "ready"}, db_path=db_path)
+            st.rerun()
     with st.expander(tr("管理这份草稿", "Manage draft")):
         if st.button(tr("放弃这份草稿", "Discard this draft"), key="discard-" + draft["id"]):
             discard_pending(draft["id"], db_path=db_path)
@@ -137,6 +158,9 @@ def review_pending(draft, db_path, public_demo):
 
 def draft_label(draft):
     stamp = datetime.fromisoformat(draft["captured_at"]).astimezone(SG_TIME)
+    if draft["input"].get("method") == "label":
+        name = (draft["input"].get("label") or {}).get("product_name") or tr("包装营养标签", "Nutrition label")
+        return f"{stamp:%m/%d %H:%M} · {name}"
     if draft["input"].get("unmatched_foods"):
         return tr(f"{stamp.month}/{stamp.day} {stamp:%H:%M}　有食物待补选", f"{stamp:%d %b %H:%M} · Food still to match")
     keys = draft["input"].get("suggested_grams", {})
@@ -172,6 +196,7 @@ def home(db_path, public_demo, today, profile, plan, eaten, partial_count, legac
         capture_meal(db_path, public_demo)
         with st.expander(tr("按菜名记餐", "Log by food name")):
             text_entry(db_path)
+        usual_meals_ui(db_path)
     if profile:
         day_strip(today, plan, eaten, partial_count=partial_count, legacy_count=legacy_count)
     elif st.button(tr("建立个人计划", "Create a personal plan"), width="stretch"):

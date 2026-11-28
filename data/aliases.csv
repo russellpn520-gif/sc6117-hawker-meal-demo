@@ -81,7 +81,7 @@ fdc-2707442,酱油,soy sauce
 fdc-2707148,酱油芡汁,勾芡酱油汁|soy gravy|soy sauce gravy
 fdc-2710375,黑咖啡,brewed coffee|black coffee|无糖黑咖啡
 cofid-19-539,土耳其旋转烤肉（仅肉）,doner kebab meat|döner kebab meat
-sgstudy-char-kuay-teow,炒粿条,char kway teow|炒贵刁
+sgstudy-char-kuay-teow,炒粿条,char kway teow|char kuey teow|炒粿條|炒贵刁
 sgstudy-yang-zhou-fried-rice,扬州炒饭,Yangzhou fried rice|扬州蛋炒饭
 sgstudy-fried-carrot-cake,炒萝卜糕,菜头粿
 sgstudy-laska,叻沙,laksa|拉沙
@@ -94,6 +94,18 @@ sgstudy-goreng-pisang,炸香蕉,goreng pisang|pisang goreng
 sgstudy-mee-rebus,马来卤面,mee rebus
 sgstudy-original-appam,印度米浆薄饼,appam
 sgstudy-naan,印度烤饼,naan|馕
+sgstudy-char-siew-wanton-noodle,叉烧云吞面,char siu wonton noodles|char siew wanton mee|wonton noodles with char siu|叉燒雲吞麵|叉烧馄饨面
+sgstudy-lor-mai-kai,糯米鸡,lor mai gai|lo mai gai|糯米雞
+sgstudy-minced-meat-mee-pok,肉脞面,bak chor mee pok|minced pork mee pok|肉脞面薄|肉脞麵薄
+sgstudy-ban-mian-dry,干拌板面,dry ban mian|干捞板面|乾撈板麵
+sgstudy-sin-chew-bee-hoon,星洲米粉,singapore fried bee hoon|sing chow bee hoon|singapore fried rice vermicelli
+sgstudy-soto-ayam,印尼鸡汤,soto ayam|索多鸡汤|印尼雞湯
+sgstudy-mee-soto,马来鸡汤面,mee soto ayam|鸡汤马来面|馬來雞湯麵
+sgstudy-egg-thosai,鸡蛋多萨,egg dosa|egg dosai|蛋多萨
+sgstudy-marsala-thosai,马萨拉多萨,masala dosa|masala thosai|masala dosai
+sgstudy-tahu-goreng,马来炸豆腐,tauhu goreng|tahu goreng
+sgstudy-vegetable-biryani,蔬菜印度香饭,vegetable biryani|vegetable biriyani|vegetable briyani
+sgstudy-boneless-mutton-biryani,无骨羊肉印度香饭,boneless mutton briyani|boneless mutton biriyani
 fdc-168070,拉美玉米饼阿雷帕,arepa|arepas|阿雷帕
 fdc-2708709,拉美馅饼,empanada|empanadas|恩潘纳达
 fdc-2708711,牛肉恩潘纳达,beef empanada

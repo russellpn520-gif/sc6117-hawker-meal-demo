@@ -91,6 +91,12 @@ def component_gap(whole, parts):
     return len(parts) == 1
 
 
+MAIN_FOOD = re.compile(
+    r"米饭|米飯|面条|麵條|米粉|主食|主菜|鸡肉|雞肉|猪肉|豬肉|牛肉|羊肉|"
+    r"\b(?:rice|noodles?|pasta|bread|flatbread|chicken|pork|beef|mutton|fish|tofu|"
+    r"staple|protein|dumplings?|lentils?|beans?|potato(?:es)?)\b", re.I)
+
+
 def is_soup(seen, food_id=None):
     if food_id == "fdc-2707132":
         return True
@@ -151,9 +157,12 @@ def resolve_photo(result, foods, filename):
         groups.append(((whole_key, dish.whole), parts, parts_only))
 
     def variant(by_parts):
-        grams, ranges, missing = {}, {}, []
+        grams, ranges, missing, main_dishes = {}, {}, [], []
         for index, (whole, parts, parts_only) in enumerate(groups):
-            using_parts = (by_parts or parts_only) and bool(parts)
+            start_missing = len(missing)
+            group_grams = {}
+            prefer_components = (by_parts is True or (by_parts == "auto" and not whole[0] and any(k for k, _ in parts)))
+            using_parts = (prefer_components or parts_only) and bool(parts)
             items = parts if using_parts else [whole]
             exclude = {whole[0]} if using_parts else set()
             if using_parts and not whole[0]:
@@ -180,6 +189,7 @@ def resolve_photo(result, foods, filename):
                 else:
                     ranges[key] = None
                 grams[key] = sum_g
+                group_grams[key] = group_grams.get(key, 0) + amount
             same_food = len(parts) == 1 and whole[0] and parts[0][0] == whole[0]
             missing_chicken = (parts_only and whole[0] == "boiled-chicken"
                                and not any(k == whole[0] or "鸡" in p.chinese or "chicken" in p.english.casefold()
@@ -190,11 +200,25 @@ def resolve_photo(result, foods, filename):
                 missing.append({"key": f"d{index}-gap", "name": f"{whole[1].chinese or whole[1].english}（未覆盖的配料）",
                                 "name_en": f"Other ingredients in {whole[1].english or 'this dish'}",
                                 "alternatives": [], "low_g": 0, "high_g": 0, "replace_food_ids": []})
+            group_missing = missing[start_missing:]
+            if group_missing and not parts_only:
+                whole_food = whole[1]
+                main_pending = any(MAIN_FOOD.search(r["name"] + " " + r["name_en"]) for r in group_missing)
+                low_coverage = 0 < whole_food.low_g <= 3000 and sum(group_grams.values()) < whole_food.low_g / 2
+                needs_main = ((main_pending or low_coverage or not group_grams) if using_parts else
+                              len(parts) >= 2 and not whole[0] and (main_pending or whole_food.low_g >= 80))
+                if needs_main:
+                    row = missing_item(f"d{index}", whole_food, foods)
+                    # An add-on such as plain rice alone is not a whole-dish replacement.
+                    row["alternatives"] = [k for k in row["alternatives"] if k not in group_grams]
+                    main_dishes.append({**row, "component_grams": group_grams,
+                                        "unresolved": [r["key"] for r in group_missing]})
         names = list(dict.fromkeys(item["name"] for item in missing))
         names_en = list(dict.fromkeys(item["name_en"] for item in missing))
         notes_en = list(getattr(result, "uncertain_items_en", []))
         alternatives = list(dict.fromkeys(k for item in missing for k in item["alternatives"]))
         return {"suggested_grams": grams, "portion_ranges": ranges, "alternatives": alternatives,
+                "main_dishes": main_dishes,
                 "uncertain_items_en": notes_en, "unmatched_foods_en": names_en,
                 "unmatched_en": list(dict.fromkeys([*notes_en, *names_en])),
                 "uncertain_items": list(result.uncertain_items), "unmatched_foods": names, "missing_items": missing,
@@ -205,6 +229,12 @@ def resolve_photo(result, foods, filename):
     # Retain a separate dish-level choice for correcting the whole by name.
     prefer_parts = any(forced or (key is None and any(k for k, _ in p)) for (key, _), p, forced in groups)
     variants = {"按配料": parts, "整道菜": whole} if prefer_parts else {"整道菜": whole, "按配料": parts}
+    if prefer_parts and len(groups) > 1:
+        best = variant("auto")
+        if best == whole:
+            variants = {"整道菜": whole, "按配料": parts}
+        elif best != parts:
+            variants = {"推荐": best, **variants}
     first = next(iter(variants.values()))
     draft = make_draft("photo", filename, first["suggested_grams"], first["unmatched"])
     portion_note = result.portion_note
@@ -372,7 +402,10 @@ def identify_photo(jpeg, filename, foods, *, api_key, ui_lang="zh", portion_hint
 
     instructions = (
         "Identify plated foods from ANY cuisine in English and Chinese for a searchable nutrition database. "
-        "Use short, familiar food names such as 蒸米饭 or 白切鸡. Name the main food as well as toppings. "
+        "For each whole dish use its short conventional menu name in both languages (e.g. nasi lemak, "
+        "pad thai, paella) if recognizable; otherwise describe the main food simply. For ingredients use "
+        "short conventional names. Keep size, item counts, garnish descriptions and guesses out of these "
+        "names; put material uncertainty in the notes. Retain preparation details that affect nutrition. "
         "Give a common dish name (e.g. burrito bowl), plus recognizable components separately. Group visible "
         "toppings with their dish. Count a separate side, e.g. chips alongside a bowl, as its own dish, "
         "even in the same container. Exclude the separate side's weight from the main dish. "
@@ -384,7 +417,9 @@ def identify_photo(jpeg, filename, foods, *, api_key, ui_lang="zh", portion_hint
         "Estimate edible mass as a plausible low/high gram range, for the WHOLE dish and separately for each "
         "visible component. Use relative area, depth, item counts, the container and any diner-supplied scale. "
         "Widen ranges when scale/depth is unclear. Use 0,0 if there is no defensible estimate. "
-        "Estimate what is served, before the diner adjusts how much they ate. Never output nutrient values. "
+        "Estimate what is served, before the diner adjusts how much they ate. If the diner limits the task "
+        "to one item, marked letter, or a food subset, identify and weigh ONLY that subset. "
+        "Never output nutrient values. "
         "Do not invent hidden oil/fillings or label weights. "
         "Use natural, concise Chinese for portion_note and uncertain_items. "
         "Translate them into idiomatic English in portion_note_en and uncertain_items_en. "

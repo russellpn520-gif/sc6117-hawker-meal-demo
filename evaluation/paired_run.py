@@ -51,18 +51,45 @@ def pipeline(jpeg, hint, key, foods):
             "usage": data["token_usage"], "model": data["model"]}
 
 
+def label_pipeline(jpeg, row, key):
+    from label_scan import read_label, label_item
+
+    data = read_label(jpeg, api_key=key, ui_lang="en")["input"]
+    try:
+        item = label_item(data["label"], float(row["amount"]), row["unit"])
+    except ValueError:
+        prediction = None
+    else:
+        prediction = item["nutrients"]
+    return {"status": "complete" if prediction is not None else "needs_review",
+            "prediction": prediction, "label": data["label"], "usage": data["token_usage"], "model": PHOTO_MODEL}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("images", type=Path)
     parser.add_argument("ledger", type=Path)
+    parser.add_argument("--release", action="store_true", help="Use held-out meal photos and back labels")
     args = parser.parse_args()
-    records = list(csv.DictReader(Path(__file__).with_name("paired_samples.csv").open(encoding="utf-8")))
+    filename = "release_samples.csv" if args.release else "paired_samples.csv"
+    records = list(csv.DictReader(Path(__file__).with_name(filename).open(encoding="utf-8")))
     if len(records) != 30 or len({r["sha256"] for r in records}) != 30 or PHOTO_MODEL != "gpt-5-mini":
         raise ValueError("Benchmark requires the frozen cohort of 30 different images and gpt-5-mini")
     key, foods = read_api_key(), load_foods()
     if not key:
         raise ValueError("No server-side API credential")
     args.ledger.mkdir(parents=True, exist_ok=True)
+    manifest = args.ledger / "cohort.txt"
+    # Ignore checkout-specific newlines while protecting images, portions and reference rows.
+    signature = filename + " " + hashlib.sha256(json.dumps(records, sort_keys=True).encode()).hexdigest()
+    if not manifest.exists() and any(args.ledger.glob("*-*.json")):
+        raise ValueError("Unmarked ledger already contains calls. Score it offline; use a new directory for a new run.")
+    try:
+        with manifest.open("x", encoding="utf-8") as f:
+            f.write(signature)
+    except FileExistsError:
+        if manifest.read_text(encoding="utf-8").strip() != signature:
+            raise ValueError("Ledger belongs to another cohort. Choose a separate directory.")
     stop = threading.Event()
     def run(row):
         jpeg = (args.images / (row["id"] + ".jpg")).read_bytes()
@@ -79,11 +106,17 @@ def main():
             except FileExistsError:
                 continue
             try:
-                result = direct(jpeg, row["hint"], key) if arm == "direct" else pipeline(jpeg, row["hint"], key, foods)
+                if arm == "direct":
+                    result = direct(jpeg, row["hint"], key)
+                elif args.release and row["category"] == "label":
+                    result = label_pipeline(jpeg, row, key)
+                else:
+                    result = pipeline(jpeg, row["hint"], key, foods)
             except Exception as exc:
                 result = {"status": "api_error", "error": type(exc).__name__}
                 if getattr(exc, "status_code", None) in (401, 402, 403, 429):
                     stop.set()
+            result["sha256"] = row["sha256"]
             file.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
             print(row["id"], arm, result["status"], flush=True)
     with ThreadPoolExecutor(max_workers=3) as pool:

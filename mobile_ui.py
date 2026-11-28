@@ -143,6 +143,9 @@ def saved_receipt(record):
         st.markdown(f"**{title}**")
         if record is None:
             return
+        if record["input"].get("method") == "label":
+            name = (record["input"].get("label") or {}).get("product_name") or tr("包装食品", "Packaged food")
+            st.text(name)
         totals = record["totals"]
         st.write(tr(f"{label}约 {totals['kcal']:.0f} kcal · 蛋白质 {totals['protein_g']:.1f} g", f"{label} · About {totals['kcal']:.0f} kcal · Protein {totals['protein_g']:.1f} g"))
         if status == "partial" and (names := record["input"].get("unmatched_foods")):
@@ -150,6 +153,8 @@ def saved_receipt(record):
 
 
 def _record_name(item):
+    if item.get("source_code") == "package-label":
+        return item.get("name") or tr("包装食品", "Packaged food")
     if st.session_state.get("ui_lang") == "en":
         food = load_foods().get(item.get("food_id"))
         if food:
@@ -184,6 +189,13 @@ def meal_history(records, day=None):
         stamp = (datetime.fromisoformat(original["captured_at"]).astimezone(SG_TIME)
                  if original.get("captured_at") else record["at"])
         with st.expander(tr(f"{stamp:%H:%M}　{title}　·　约 {record['totals']['kcal']:.0f} kcal", f"{stamp:%H:%M} · {title} · About {record['totals']['kcal']:.0f} kcal")):
+            if original.get("method") == "label":
+                from label_ui import label_history
+                label_history(items[0])
+                if usage := original.get("token_usage"):
+                    st.caption(tr(f"标签识别 · 输入 {usage['input_tokens']}，输出 {usage['output_tokens']} tokens",
+                                  f"Label scan · {usage['input_tokens']} input and {usage['output_tokens']} output tokens"))
+                continue
             weight = sum(item["confirmed_g"] for item in items)
             served = original.get("served_grams")
             if served:

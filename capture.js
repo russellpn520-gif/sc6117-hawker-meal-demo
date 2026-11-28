@@ -6,7 +6,13 @@ export default function ({data, parentElement, setStateValue}) {
   const note = panel.querySelector("[role=status]");
   const storageKey = "sc6117.capture." + data.device;
   const buttons = Array.from(panel.querySelectorAll("button"));
-  buttons[0].textContent = tr("拍下这餐", "Take photo");
+  const details = panel.querySelector(".scale-hint");
+  const hint = details.querySelector("input");
+  details.hidden = data.mode === "label";
+  details.querySelector("summary").textContent = tr("补充份量线索（选填）", "Add a portion clue (optional)");
+  details.querySelector("label span").textContent = tr("拍照前填写", "Enter before taking the photo");
+  hint.placeholder = tr("例如：碗口约 15 cm，米饭半碗", "e.g. bowl is 15 cm across, half a bowl of rice");
+  buttons[0].textContent = data.mode === "label" ? tr("拍营养标签", "Scan nutrition label") : tr("拍下这餐", "Take photo");
   buttons[1].textContent = tr("从相册选", "Choose photo");
   function busy(value) { buttons.forEach(button => button.disabled = value); }
   function pending() {
@@ -29,6 +35,9 @@ export default function ({data, parentElement, setStateValue}) {
   if (data.ack && panel.dataset.sent === data.ack) {
     busy(false);
     note.textContent = "";
+    hint.value = "";
+    details.open = false;
+    delete panel.dataset.sent;
   }
 
   async function selectPhoto(event) {
@@ -55,7 +64,8 @@ export default function ({data, parentElement, setStateValue}) {
       if (jpeg.length > 240000) jpeg = canvas.toDataURL("image/jpeg", 0.53).split(",")[1];
       const uuid = crypto.randomUUID?.() || "10000000-1000-4000-8000-100000000000".replace(/[018]/g,
         ch => (Number(ch) ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> Number(ch) / 4).toString(16));
-      const record = {id: uuid, device: data.device,
+      const record = {id: uuid, device: data.device, mode: data.mode || "photo",
+        portion_hint: data.mode === "label" ? "" : hint.value.trim().slice(0,150),
         captured_at: new Date().toISOString(), jpeg};
       try {
         localStorage.setItem(storageKey, JSON.stringify(record));

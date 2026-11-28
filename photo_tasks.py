@@ -36,7 +36,14 @@ def _recognize(draft, db_path, lease, api_key):
         if api_key and api_key.strip():
             language = draft["input"].get("ui_lang", draft.get("ui_lang", "zh"))
             name = "Meal photo" if language == "en" else "餐食照片"
-            result = identify_photo(draft["photo"], name, load_foods(), api_key=api_key, ui_lang=language)
+            if draft["input"].get("method") == "label":
+                from label_scan import read_label
+                result = read_label(draft["photo"], api_key=api_key, ui_lang=language)
+            else:
+                hint = draft["input"].get("portion_hint", "")
+                options = {"portion_hint": hint[:150]} if hint else {}
+                result = identify_photo(draft["photo"], name, load_foods(), api_key=api_key, ui_lang=language,
+                                        **options)
             result.update(id=draft["id"], status="ready")
         else:
             result = _failure(draft, "unconfigured")

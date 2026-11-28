@@ -73,6 +73,23 @@ def mixed_soy_ginger_sauce(english, chinese):
             and bool(re.search(r"\b(?:sauce|dressing|oil)\b", english, flags=re.I)))
 
 
+# Strip only presentation details. A filling, sauce, cooking fat or preparation
+# in parentheses changes the food and must survive automatic matching.
+PHOTO_DETAIL = re.compile(
+    r"(?:sliced|diced|chopped|cubed|whole|halved|small|medium|large|single serving|"
+    r"\d+(?:\.\d+)?\s*(?:g|grams?|ml|pieces?|slices?|portions?)|"
+    r"切片|切丁|切块|切塊|半个|半個|对半|對半|小碗|大碗|中碗|单份|單份|"
+    r"[一二三四五六两兩\d]+\s*[个個片块塊份只隻克])", re.I)
+
+
+def photo_name(text):
+    text = unicodedata.normalize("NFKC", text).strip()
+    def parenthetical(match):
+        details = re.split(r"[,;/、]", match[1])
+        return "" if all(PHOTO_DETAIL.fullmatch(s.strip()) for s in details) else match[0]
+    return re.sub(r"\(([^()]*)\)", parenthetical, text).strip()
+
+
 # These descriptions add a serving vessel, garnish, shape or uncertain variety.
 # Restrict the allowed qualifiers so a sauce or oil cannot be silently stripped.
 def prepared_photo_reference(english, chinese):
@@ -127,6 +144,10 @@ class Catalog(dict):
         direct = self.exact_food(english, chinese)
         if direct:
             return direct
+        simplified = (photo_name(english), photo_name(chinese))
+        if simplified != (english, chinese):
+            if key := self.exact_food(*simplified):
+                return key
         # Slicing changes the shape of an identified meat, but not its recipe.
         # Only reuse a curated equivalent. Preserve cooking, sauces and oil.
         base = re.sub(r"(肉)[片块丁]$|[（(]切[片块丁][)）]$", r"\1", chinese.strip())
@@ -164,7 +185,10 @@ class Catalog(dict):
         candidates = {}
         for name in (chinese, english):
             query = normalize(name)
-            for key in self.search(query, 12):
+            if not query:
+                continue
+            words = terms(query)
+            for key in self.search(query, 24):
                 if self[key].source == "gyg-au":
                     continue
                 for label in self.labels[key]:
@@ -177,8 +201,16 @@ class Catalog(dict):
                     else:
                         related = f" {label} " in f" {query} "
                     if related:
-                        score = len(label) / len(query)
+                        score = 1 + len(label) / len(query)
                         candidates[key] = max(score, candidates.get(key, 0))
+                    elif len(words) >= 2:
+                        tokens = terms(label)
+                        common = words & tokens
+                        # A complete query inside a longer catalog description, or a
+                        # two-token near match, is a suggestion for the diner only.
+                        overlap = len(common) / len(words | tokens)
+                        if len(common) >= 2 and (overlap >= .5 or words <= tokens):
+                            candidates[key] = max(overlap, candidates.get(key, 0))
         return sorted(candidates, key=lambda k: (-candidates[k], self.priority(k)))[:3]
 
     def search(self, query, limit=18):

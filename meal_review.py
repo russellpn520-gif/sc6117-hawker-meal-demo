@@ -69,12 +69,90 @@ def _restore_omitted(view, key):
     st.session_state[f"{view}-decisions"] = decisions
 
 
-def _repair_controls(panel, view, rows, foods, selected):
+def _set_main(view, group, candidate):
+    choices = st.session_state.setdefault(f"{view}-main-choices", {})
+    if candidate is None:
+        choices.pop(group, None)
+    else:
+        choices[group] = candidate
+
+
+def _main_review(panel, original, view, foods):
+    """Allow one dish to replace its matched components, keeping other plates and sides."""
+    groups = original.get("main_dishes", [])
+    selected = st.session_state.get(f"{view}-main-choices", {})
+    grams = dict(original["suggested_grams"])
+    ranges = dict(original.get("portion_ranges", {}))
+    cleared, decisions = set(), []
+    for group in groups:
+        name, group_id = _row_name(group), group["key"]
+        prefix = f"{view}-{group_id}-main"
+        candidate = selected.get(group_id)
+        if candidate is None and all(k in st.session_state.get(f"{view}-decisions", {}) for k in group["unresolved"]):
+            continue
+        if candidate in foods:
+            low, high = group.get("low_g", 0), group.get("high_g", 0)
+            weight = round((low + high) / 2) if 0 < low <= high <= 3000 else foods[candidate].serving_g
+            components = group["component_grams"]
+            if grams.get(candidate, 0) - components.get(candidate, 0) + weight <= 3000:
+                for key, amount in components.items():
+                    grams[key] -= amount
+                    if grams[key] == 0:
+                        grams.pop(key)
+                    ranges.pop(key, None)
+                grams[candidate] = grams.get(candidate, 0) + weight
+                ranges.pop(candidate, None)
+                cleared.update(group["unresolved"])
+                decisions.append({"name": group["name"], "name_en": group["name_en"], "scope": "whole_dish",
+                                  "food_id": candidate, "group": group_id})
+                panel.caption(tr(f"已按整道「{food_name(foods[candidate])}」计入，可在下方调整克数。",
+                                 f"Counting {food_name(foods[candidate])} as one dish. You can adjust its weight below."))
+                panel.button(tr("改回按配料", "Return to ingredients"), key=prefix + "-undo",
+                             on_click=_set_main, args=(view, group_id, None))
+                continue
+            panel.warning(tr("同一食物累计超过 3,000 g，请换一项或按配料核对。",
+                             "That choice exceeds 3,000 g for one food. Choose another or review the ingredients."))
+        with panel.expander(tr(f"补上主菜 · {name}", f"Match the main dish · {name}"), expanded=True):
+            st.caption(tr("选择整道菜会替换这道菜的配料，其他菜和饮品仍单独计算。",
+                          "Choose one whole dish to replace its ingredients. Other dishes and drinks stay separate."))
+            if group.get("remembered_id") in foods:
+                previous = food_name(foods[group["remembered_id"]])
+                st.caption(tr(f"你上次为这道菜选了「{previous}」。", f"You previously chose {previous} for this dish."))
+            for key in group.get("alternatives", ()):
+                if key in foods:
+                    st.button(food_name(foods[key]), key=prefix + "-" + key, help=source_name(foods[key].source_label),
+                              on_click=_set_main, args=(view, group_id, key))
+            query = st.text_input(tr("搜索整道菜名", "Search for a whole dish"), key=prefix + "-search",
+                                  placeholder=tr("例如：福建炒虾面", "e.g. Hokkien mee"))
+            if query.strip():
+                matches = foods.search(query)
+                if matches:
+                    labels = {k: f"{food_name(foods[k])} · {source_name(foods[k].source_label)}" for k in matches}
+                    key = st.selectbox(tr("食物库中的整道菜", "Whole dish in the database"), matches,
+                                       format_func=labels.__getitem__,
+                                       key=prefix + "-select")
+                    st.button(tr("按这道菜计入", "Use this dish"), key=prefix + "-use", on_click=_set_main,
+                              args=(view, group_id, key))
+                else:
+                    st.caption(tr("没有匹配，可以换个菜名，或在下方分别补选主食和配料。",
+                                  "Try another dish name or match the staple and ingredients below."))
+    if decisions:
+        original.update(suggested_grams=grams, portion_ranges=ranges,
+                        missing_items=[row for row in original["missing_items"] if row["key"] not in cleared])
+        view += "-whole-" + "-".join(d["group"] + d["food_id"] for d in decisions)
+    return view, decisions
+
+
+def _repair_controls(panel, view, rows, foods, selected, main_dishes=()):
     decisions = st.session_state.get(f"{view}-decisions", {})
     decisions = {k: v for k, v in decisions.items() if v is None or v in selected}
     st.session_state[f"{view}-decisions"] = decisions
     pending = [row for row in rows if row["key"] not in decisions]
-    repair = panel.expander(tr("补选未匹配的食物", "Match missing foods") if pending else tr("已核对的食物", "Reviewed foods"), expanded=bool(pending))
+    pending_keys = {r["key"] for r in pending}
+    choose_main = any(pending_keys.intersection(g["unresolved"]) for g in main_dishes)
+    title = (tr("逐项核对配料", "Review ingredients individually") if choose_main else
+             tr("补选未匹配的食物", "Match missing foods") if pending else tr("已核对的食物", "Reviewed foods"))
+    repair = panel.expander(title, expanded=bool(pending) and not choose_main)
     with repair:
         if pending:
             names = {r["key"]: _row_name(r) for r in pending}
@@ -86,13 +164,16 @@ def _repair_controls(panel, view, rows, foods, selected):
             low, high = row.get("low_g", 0), row.get("high_g", 0)
             if 0 < low <= high <= 3000:
                 st.caption(tr(f"照片估计 {low}–{high} 克，补选后可调整。", f"Estimated {low}–{high} g. You can adjust this after matching."))
+            if row.get("remembered_id") in foods:
+                previous = food_name(foods[row["remembered_id"]])
+                st.caption(tr(f"你曾为这项选过「{previous}」。", f"You previously chose {previous} for this item."))
             quick = [k for k in dict.fromkeys(row.get("alternatives", [])) if k in foods][:3]
             with st.container(horizontal=True):
                 for k in quick:
                     label = tr(f"对应已选的{food_name(foods[k])}", f"Use selected {food_name(foods[k])}") if k in selected else f"＋ {food_name(foods[k])}"
                     st.button(label, key=f"{controls}-add-{k}", help=source_name(foods[k].source_label),
                               on_click=_resolve_food, args=(view, row, k, foods))
-            with st.expander(tr("查找其他食物", "Look up another food")):
+            with st.expander(tr("查找其他食物", "Look up another food"), expanded=not quick):
                 query = st.text_input(tr("搜索合适的菜名或食材", "Search for a dish or ingredient"), key=f"{controls}-lookup")
                 if query.strip():
                     matches = foods.search(query)
@@ -202,19 +283,29 @@ def review_meal(draft):
     view = prefix
     if variants := draft.get("variants"):
         modes = list(variants)
-        with leftovers:
-            labels = {m: tr(m, {"整道菜": "Whole dish", "按配料": "Ingredients"}.get(m, m)) for m in modes}
+        legacy_partial = "main_dishes" not in original and any(
+            v.get("missing_items") for v in variants.values())
+        with (repair_area if legacy_partial else leftovers):
+            labels = {m: tr(m, {"整道菜": "Whole dish", "按配料": "Ingredients", "推荐": "Suggested"}.get(m, m)) for m in modes}
             mode = _review_choice(tr("要调整哪一部分？", "Adjust portions by"), modes, labels, modes[0], f"{prefix}-mode")
             st.caption(tr("只剩了碗里的米饭或配菜？点「按配料」单独调整。", "Choose Ingredients to adjust the rice or a topping separately."))
         original.update(variants[mode], portion_mode=mode)
         view = f"{prefix}-{mode}"
 
+    base_view = view
+    view, main_decisions = _main_review(repair_area, original, base_view, foods)
     rows = _missing_items(original, foods)
     corrections = st.expander(tr("改菜名或餐盘份量", "Edit foods and serving sizes"), expanded=not rows and not bool(original["suggested_grams"]))
     weights = _correct_foods(corrections, foods, original, view)
+    # Deselecting a whole-dish replacement reopens that group for review.
+    dropped = [d for d in main_decisions if d["food_id"] not in weights]
+    if dropped:
+        for decision in dropped:
+            _set_main(base_view, decision["group"], None)
+        st.rerun()
     pending, decisions = [], {}
     if rows:
-        pending, decisions = _repair_controls(repair_area, view, rows, foods, weights)
+        pending, decisions = _repair_controls(repair_area, view, rows, foods, weights, original.get("main_dishes", []))
     with leftovers:
         fractions = {}
         for key in weights:
@@ -231,7 +322,11 @@ def review_meal(draft):
     display_names = tr("、", ", ").join(_row_name(row) for row in pending)
     with summary:
         if pending:
-            st.warning(tr(f"还有 {len(pending)} 项未计入 · ", f"Foods still missing ({len(pending)}) · ") + display_names)
+            unresolved = {r["key"] for r in pending}
+            if any(unresolved.intersection(g["unresolved"]) for g in original.get("main_dishes", [])):
+                st.warning(tr("主菜还没记全。先选整道菜，或补齐主食和配料。", "The main dish is incomplete. Choose a whole dish or match its staple and ingredients."))
+            else:
+                st.warning(tr(f"还有 {len(pending)} 项未计入 · ", f"Foods still missing ({len(pending)}) · ") + display_names)
         if weights:
             st.write(tr("、", ", ").join(food_name(foods[key]) for key in weights))
             changed = [f"{food_name(foods[key])} · {_share_label(int(share * 4))}"
@@ -283,7 +378,8 @@ def review_meal(draft):
                         eaten_fraction=sum(consumed.values()) / sum(weights.values()),
                         partial_record=bool(pending), missing_items=pending, unmatched_foods=names,
                         unmatched=list(dict.fromkeys([*names, *notes])),
-                        coverage_decisions=[{"name": r["name"], "food_id": decisions[r["key"]]}
-                                            for r in rows if r["key"] in decisions])
+                        coverage_decisions=main_decisions + [
+                            {"name": r["name"], "name_en": r.get("name_en"), "food_id": decisions[r["key"]]}
+                            for r in rows if r["key"] in decisions])
         return {**draft, "input": original}, items
     return None
