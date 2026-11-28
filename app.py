@@ -46,8 +46,7 @@ def capture_meal(db_path, public_demo):
         hint = tr("拍清营养成分表和份量单位。", "Include the panel and serving units.")
     else:
         hint = tr("先拍照，吃完再确认。", "Take a photo now and confirm after eating.")
-    access = (tr("OpenAI 识别首次需组员码。", "The first OpenAI scan needs a team access code.") if public_demo
-              else tr("照片由 OpenAI 识别。", "OpenAI scans the photo."))
+    access = tr("选好照片后会自动发送给 OpenAI 识别。", "Selected photos are sent to OpenAI for recognition.")
     st.caption(f"{hint} {access}")
     record = result.capture
     if (not isinstance(record, dict) or record.get("device") != device
@@ -188,7 +187,7 @@ def draft_label(draft, *, time_only=False):
 def meal_entry(db_path, public_demo):
     if not st.session_state.get("practice_mode"):
         capture_meal(db_path, public_demo)
-        if st.button(tr("没带饭？用示例鸡饭试走一遍（免码）", "Try with a sample chicken rice photo (no code needed)"),
+        if st.button(tr("用示例鸡饭试走一遍", "Try with a sample chicken rice photo"),
                      key="sample_chicken", width="stretch"):
             _, key = start_practice(db_path, datetime.now(SG_TIME).date(), restart=True)
             _switch_practice(True, key)

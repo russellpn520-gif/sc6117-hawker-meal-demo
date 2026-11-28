@@ -174,6 +174,11 @@ def _pending_record(row):
     return {**json.loads(data), "id": key, "captured_at": captured_at, "photo": photo}
 
 
+def has_pending(*, db_path=None):
+    with closing(open_db(db_path)) as db:
+        return db.execute("SELECT 1 FROM pending LIMIT 1").fetchone() is not None
+
+
 def list_pending(*, db_path=None):
     with closing(open_db(db_path)) as db:
         return [_pending_record(row) for row in db.execute(

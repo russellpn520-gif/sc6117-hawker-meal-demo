@@ -24,11 +24,11 @@ class TeamPhotoAccessTests(unittest.TestCase):
         self.enterContext(patch("photo_access.read_api_key", side_effect=AssertionError("public call read a local key")))
         self.enterContext(patch("photo_access.local_setting", side_effect=AssertionError("public call read local config")))
 
-    def open(self, device):
+    def open(self, device, *, coach=True):
         app = AppTest.from_string(f"""
 import streamlit as st
-from photo_access import photo_api_key
-key = photo_api_key(public_demo=True)
+from photo_access import coach_api_key, photo_api_key
+key = {"coach_api_key" if coach else "photo_api_key"}(public_demo=True)
 st.session_state.result = "granted" if key == {self.KEY!r} else ("denied" if not key else "unexpected key")
 """)
         app.session_state["diary_token"] = device
@@ -42,7 +42,16 @@ st.session_state.result = "granted" if key == {self.KEY!r} else ("denied" if not
         visible = "\n".join(str(element.proto) for element in app if hasattr(element, "proto"))
         self.assertNotIn(self.KEY, visible)
 
-    def test_locked_with_absent_or_wrong_codes_even_with_provider_configured(self):
+    def test_new_public_visitor_can_scan_without_any_access_code(self):
+        del self.config["TEAM_PHOTO_CODE"]
+        for device in (self.A, None):
+            app = self.open(device, coach=False)
+            self.check(app, "granted")
+            self.assertFalse(app.text_input)
+        self.config["OPENAI_API_KEY"] = ""
+        self.check(self.open(self.A, coach=False), "denied")
+
+    def test_coach_locked_with_absent_or_wrong_codes_even_with_provider_configured(self):
         for code in ("", "short", self.KEY):
             with self.subTest(server_code=code):
                 self.config["TEAM_PHOTO_CODE"] = code
@@ -53,7 +62,7 @@ st.session_state.result = "granted" if key == {self.KEY!r} else ("denied" if not
         app = self.open(self.A)
         self.check(app, "denied")
         for entered in ("", "wrong-team-code"):
-            app.text_input(key="photo_code_input").set_value(entered)
+            app.text_input(key="coach_code_input").set_value(entered)
             app.button[0].click().run()
             self.check(app, "denied")
             self.assertIn("did not match", app.error[0].value)
@@ -61,7 +70,7 @@ st.session_state.result = "granted" if key == {self.KEY!r} else ("denied" if not
 
     def test_grant_is_tied_to_device_and_current_team_code(self):
         app = self.open(self.A)
-        app.text_input(key="photo_code_input").set_value(self.CODE)
+        app.text_input(key="coach_code_input").set_value(self.CODE)
         app.button[0].click().run()
         self.check(app, "granted")
         self.check(self.open(self.A), "granted")
@@ -73,7 +82,7 @@ st.session_state.result = "granted" if key == {self.KEY!r} else ("denied" if not
         self.config["TEAM_PHOTO_CODE"] = "different-fictional-code-02"
         self.check(app.run(), "denied")
         self.check(self.open(self.A), "denied")
-        app.text_input(key="photo_code_input").set_value(self.CODE)
+        app.text_input(key="coach_code_input").set_value(self.CODE)
         app.button[0].click().run()
         self.check(app, "denied")
         self.config["OPENAI_API_KEY"] = ""

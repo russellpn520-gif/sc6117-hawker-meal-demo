@@ -50,7 +50,7 @@ if result:
                 app.run()
                 self.assertFalse(app.exception)
                 self.assertEqual(app.title[0].value, "Meal Diary")
-                self.assertTrue(any("team access code" in c.value for c in app.caption))
+                self.assertTrue(any("sent to OpenAI" in c.value for c in app.caption))
                 app.text_input[0].set_value("white rice, boiled egg")
                 next(b for b in app.button if b.label == "Find foods and create draft").click().run()
                 next(b for b in app.button if b.label == "Ate it all · Log meal").click().run()

@@ -28,9 +28,9 @@ uv run streamlit run app.py --server.address 127.0.0.1 --server.port 8617
 
 打开 [本地应用](http://127.0.0.1:8617)。菜名查表、营养换算、记餐和训练改期均可离线运行。单用户日志按新加坡日期存入本机 `.local/meals.sqlite3`，重新打开页面仍能看到当天记录。测试可通过 `TRACK3_DB` 指向独立的 SQLite 文件。
 
-**照片识别**使用 OpenAI Responses API 和 `gpt-5-mini`。在手机上点「拍下这餐」或「从相册选」，浏览器会压缩照片并保存草稿。首次在公共站点使用识别时，输入组内私下分发的拍照码。服务端向 OpenAI 提交餐食照片和识别指令，关闭响应存储和自动重试。饭后再确认实际吃下的份量，才会计入日记。每餐识别详情显示 API 返回的实际输入、输出和合计 token 数。[模型说明与价格](https://developers.openai.com/api/docs/models/gpt-5-mini)
+**照片识别**使用 OpenAI Responses API 和 `gpt-5-mini`。在手机上点「拍下这餐」或「从相册选」，浏览器会压缩照片并保存草稿。选好照片后会自动开始识别。服务端向 OpenAI 提交餐食照片和识别指令，关闭响应存储和自动重试。饭后再确认实际吃下的份量，才会计入日记。每餐识别详情显示 API 返回的实际输入、输出和合计 token 数。[模型说明与价格](https://developers.openai.com/api/docs/models/gpt-5-mini)
 
-本机可在项目目录未跟踪的 `.env` 中设置 `OPENAI_API_KEY`，也支持环境变量。Windows 回环地址下另支持本机凭据管理器。在局域网部署还需设置随机的 `TEAM_PHOTO_CODE`（至少 12 位）。查表、调整份量、确认记餐、训练改期及切换语言均消耗 0 个 API token。
+本机可在项目目录未跟踪的 `.env` 中设置 `OPENAI_API_KEY`，也支持环境变量。Windows 回环地址下另支持本机凭据管理器。查表、调整份量、确认记餐、训练改期及切换语言均消耗 0 个 API token。
 
 ## Streamlit Community Cloud
 
@@ -38,9 +38,9 @@ uv run streamlit run app.py --server.address 127.0.0.1 --server.port 8617
 
 待确认的实拍餐会在云端临时 SQLite 中保存压缩照片，并尝试在本机浏览器备份草稿。确认或舍弃后会移除草稿原图并更新设备备份。已确认的餐盘照片仅在该日记保留一张去除 EXIF 的 JPEG 缩略图，长边最多 320 像素、大小最多 25 KB，展开这餐即可查看。包装标签只保存确认后的数字。云端临时磁盘重置后，已备份的草稿可在原浏览器恢复。已确认日记、缩略图和个人档案依赖云端临时存储；在设置中清除日记会一并清除缩略图。
 
-## 免码试玩与附近晚餐
+## 示例试玩与附近晚餐
 
-在拍照入口下选择示例鸡饭，调整油饭吃了几成，可顺手加一杯饮品。确认后打开「看晚餐建议 → 在外吃」，选当前定位或地标，再把想吃的方案加入草稿。右下角米团可以预览并确认训练改期。试玩使用独立日记、预填的示例训练计划及本地图像，快捷操作无需模型或组员码。退出试玩可回到自己的记录。
+在拍照入口下选择示例鸡饭，调整油饭吃了几成，可顺手加一杯饮品。确认后打开「看晚餐建议 → 在外吃」，选当前定位或地标，再把想吃的方案加入草稿。右下角米团可以预览并确认训练改期。试玩使用独立日记、预填的示例训练计划及本地图像，示例与快捷操作都在本地计算。退出试玩可回到自己的记录。
 
 附近点单卡按地标或主动授权的大致位置计算直线距离，使用本地菜单资料与 NEA 清洗日期快照。打开 Google Maps 可以查路线、营业时间及食客评价。[食阁清单、菜单来源与清洗安排](data/HAWKER_SOURCES.md)
 
@@ -48,7 +48,7 @@ uv run streamlit run app.py --server.address 127.0.0.1 --server.port 8617
 
 饮品按可调整的参考杯量计算。黑咖啡、红茶、无糖豆浆来自本地 USDA 条目。Kopi C Siu Dai 的示例杯按黑咖啡 175 g、淡奶 20 g、糖 5 g 分项查表；实际档口调配会有差异。[新加坡 HealthHub 点单用语](https://www.healthhub.sg/well-being-and-lifestyle/food-diet-and-nutrition/i-love-coffee-i-love-tea)
 
-维护者在 **Settings → Secrets** 设置顶层 `OPENAI_API_KEY` 和随机的 `TEAM_PHOTO_CODE`。照片识别使用组内共享的课程额度。拍照码验证通过后，同一浏览器在应用存储保留期间可继续识别；更换拍照码会撤销旧授权。公开二维码只用于打开应用。把更新推送至部署分支后，原网址和二维码会自动载入新版本。[Streamlit Secrets](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management)
+维护者在 **Settings → Secrets** 设置顶层 `OPENAI_API_KEY`。任何打开公开网址的访客都能直接使用餐食和包装标签识别，调用计入项目共享 API 额度。米团的自由提问使用单独的组内顾问码配置 `TEAM_COACH_CODE`（至少 12 位，兼容旧部署的 `TEAM_PHOTO_CODE`）。把更新推送至部署分支后，原网址和二维码会自动载入新版本。[Streamlit Secrets](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management)
 
 ## 一分钟试用
 

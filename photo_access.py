@@ -1,4 +1,4 @@
-"""Gate the team's paid OpenAI calls while keeping the public diary usable."""
+"""Resolve server-side scan credentials and authorize free-text coach questions."""
 
 import hmac
 import sys
@@ -74,25 +74,29 @@ def _team_api_key(public_demo, *, coach):
         return key
 
     get_setting = _cloud_secret if public_demo else local_setting
-    key, code = get_setting("OPENAI_API_KEY"), get_setting("TEAM_PHOTO_CODE")
+    key = get_setting("OPENAI_API_KEY")
+    if not coach:
+        if not key:
+            st.info(tr("照片已保存。识别服务尚未配置，可先手动记录。",
+                       "Photo saved. Scanning has not been configured yet. You can still enter the meal manually."))
+        return key
+
+    # Existing deployments use the original setting for free-text coach access.
+    code = get_setting("TEAM_COACH_CODE") or get_setting("TEAM_PHOTO_CODE")
     if not key or len(code) < 12 or code == key:
-        st.info(tr("自由提问尚未配置，可以先使用快捷问题。", "Free-text questions are not configured yet. Use the quick actions.")
-                if coach else tr("照片已保存。组员识别尚未配置，可先按菜名补记。",
-                                 "Photo saved. Team scanning is not configured yet. You can still log the foods by name."))
+        st.info(tr("自由提问尚未配置，可以先使用快捷问题。", "Free-text questions are not configured yet. Use the quick actions."))
         return ""
     device = st.session_state.get("diary_token")
     if _device_authorized(code, device):
         return key
-    st.caption(tr("使用组内拍照码启用自由提问。快捷问题免费。", "Use your team's photo code to enable free-text questions. Quick actions are free.")
-               if coach else tr("照片已存为草稿。组员输入拍照码后会发送给 OpenAI 识别，也可在下方填写菜名。",
-                                "Your photo is saved as a draft. Use the team code to send it to OpenAI, or enter the foods below."))
-    with st.form("unlock_team_coach" if coach else "unlock_team_photo", clear_on_submit=True):
-        entered = st.text_input(tr("组员拍照码", "Team photo code"), type="password", max_chars=128,
-                                autocomplete="off", key="coach_code_input" if coach else "photo_code_input")
-        label = tr("启用自由提问", "Enable free-text questions") if coach else tr("启用拍照识别", "Enable photo scanning")
+    st.caption(tr("组内顾问码可启用自由提问。快捷问题免费。", "Use your team’s coach code for free-text questions. Quick actions are free."))
+    with st.form("unlock_team_coach", clear_on_submit=True):
+        entered = st.text_input(tr("组内顾问码", "Team coach code"), type="password", max_chars=128,
+                                autocomplete="off", key="coach_code_input")
+        label = tr("启用自由提问", "Enable free-text questions")
         if st.form_submit_button(label):
             if hmac.compare_digest(code.encode(), entered.strip().encode()):
                 _device_authorized(code, device, grant=True)
                 st.rerun()
-            st.error(tr("拍照码不匹配，请核对后再试。", "That code did not match. Check the team code and try again."))
+            st.error(tr("顾问码不匹配，请核对后再试。", "That code did not match. Check the team code and try again."))
     return ""

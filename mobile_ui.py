@@ -117,7 +117,8 @@ def apply_mobile_style():
       .meal-track.in-range span {background: #b59a59;}
       .meal-track.above-range span {background: #c18950;}
       .meal-track.no-target {height: 2px;}
-      .meal-rhythm {display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); gap: 2px; margin: .15rem 0 .35rem; padding: 0;}
+      .meal-rhythm {display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); gap: 2px; margin: .15rem 0 .35rem;
+                    list-style: none; padding: 0; padding-inline-start: 0 !important;}
       .meal-rhythm li {display: grid; justify-items: center; gap: .3rem; font-size: .78rem; font-variant-numeric: tabular-nums;}
       .meal-rhythm i {box-sizing: border-box; width: .72rem; height: .72rem; border: 1px solid #779281; border-radius: 50%;}
       .meal-rhythm .logged i {background: #77a987; border-color: #577e63;}
@@ -243,6 +244,13 @@ def _adjusted_portion(input_data):
     return None
 
 
+def _meal_names(items):
+    names = tr("、", ", ").join(_record_name(item) for item in items[:2])
+    if len(items) > 2:
+        names += tr(f" 等 {len(items)} 项", f" + {len(items) - 2} more")
+    return names
+
+
 def saved_receipt(record, *, just_saved):
     status = coverage_status(record)
     if status == "complete":
@@ -250,7 +258,7 @@ def saved_receipt(record, *, just_saved):
     else:
         title = tr("这餐已记录的小计", "Logged meal subtotal")
     st.markdown(f"**{title}**")
-    names = tr("、", ", ").join(_record_name(item) for item in record.get("items", [])[:2])
+    names = _meal_names(record.get("items", []))
     totals = record["totals"]
     values = tr(f"约 {totals['kcal']:.0f} kcal · 蛋白质 {totals['protein_g']:.1f} g",
                 f"About {totals['kcal']:.0f} kcal · {totals['protein_g']:.1f} g protein")
@@ -309,9 +317,7 @@ def meal_history(records, day=None, *, db_path=None):
         items = record["items"]
         if not items:
             continue
-        title = tr("、", ", ").join(_record_name(item) for item in items[:2])
-        if len(items) > 2:
-            title += tr(f" 等 {len(items)} 项", f" + {len(items) - 2} more")
+        title = _meal_names(items)
         original = record["input"]
         if status == "partial":
             title += tr("（部分记录）", " (partial)")

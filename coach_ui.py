@@ -6,7 +6,7 @@ from pathlib import Path
 import streamlit as st
 
 from i18n import tr
-from meals import SG_TIME, get_profile
+from meals import SG_TIME, get_profile, has_pending
 
 
 _STYLE = Path(__file__).with_name("coach.css")
@@ -62,6 +62,8 @@ def _show_reply(state, today, db_path):
     if not state["turns"]:
         return
     turn = state["turns"][-1]
+    if turn.get("added_to_diary_draft"):
+        return
     reply = turn["reply"]
     if "dinner_mode" in reply:
         from nutrition_coach import save_dinner_mode
@@ -90,6 +92,7 @@ def _show_reply(state, today, db_path):
 
         draft_id = nearby_dinner(state, today, db_path, reply.get("dinner_budget_sgd"))
         if draft_id:
+            turn["added_to_diary_draft"] = True
             st.session_state.active_draft = draft_id
             st.session_state.section = "记餐"
             st.session_state.edit_profile = False
@@ -162,7 +165,7 @@ def _refresh_preferences(state, today, db_path):
                       if not turn["reply"].get("show_nutrition") and "PlanDinner" not in turn["reply"].get("tool_names", [])]
     state["preferences"] = False
     state["food_profile"] = get_preferences(db_path)
-    if previous and previous[-1] not in state["turns"]:
+    if previous and previous[-1] not in state["turns"] and not previous[-1].get("added_to_diary_draft"):
         if previous[-1]["quick"] in {"dinner", "shopping"}:
             _ask(state, "", today, db_path, quick=previous[-1]["quick"])
         else:
@@ -172,6 +175,8 @@ def _refresh_preferences(state, today, db_path):
 def _greeting(today, db_path):
     from coach import _today_values
 
+    if has_pending(db_path=db_path):
+        return tr("这餐在待确认里。慢慢吃，吃完再调份量。", "Your meal is waiting in drafts. Enjoy it and confirm your portions afterwards.")
     rows, _, _, plan = _today_values(get_profile(db_path=db_path), today, db_path)
     if rows and timedelta() <= datetime.now(SG_TIME) - rows[0]["at"] < timedelta(minutes=30):
         return tr("这餐记好啦。晚餐想在附近吃点什么？", "Meal’s in the diary. Shall we find something nearby for dinner?")
@@ -195,7 +200,8 @@ def _panel(today, db_path, public_demo):
         _ask(state, "", today, db_path, quick="dinner")
     elif state["turns"]:
         last = state["turns"][-1]
-        if last.get("quick") in ("dinner", "shopping") and last.get("lang") != st.session_state.get("ui_lang", "zh"):
+        if (not last.get("added_to_diary_draft") and last.get("quick") in ("dinner", "shopping")
+                and last.get("lang") != st.session_state.get("ui_lang", "zh")):
             _ask(state, "", today, db_path, quick=last["quick"], replace=True,
                  dinner_budget_sgd=last["reply"].get("dinner_budget_sgd"))
     with st.container(key="mituan_panel"):
