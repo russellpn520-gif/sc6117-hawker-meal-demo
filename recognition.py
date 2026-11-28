@@ -3,7 +3,6 @@ import io
 import os
 import re
 
-from langchain_openai import ChatOpenAI
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
@@ -67,20 +66,20 @@ def resolve_photo(result, foods, filename):
         groups.append((whole, parts))
 
     def variant(by_parts):
-        grams, ranges, unknown = {}, {}, list(result.uncertain_items)
+        grams, ranges, missing = {}, {}, []
         alternatives = []
         for whole, parts in groups:
             items = parts if parts and (by_parts or not whole[0][0]) and any(k for k, _ in parts) else whole
             for key, seen in items:
                 if not key:
-                    unknown.append(seen.chinese or seen.english)
+                    missing.append(seen.chinese or seen.english)
                     alternatives.extend(foods.search(seen.english, 3))
                     alternatives.extend(foods.search(seen.chinese, 3))
                     continue
                 amount, bounds = portion_guess(foods[key], seen)
                 sum_g = grams.get(key, 0) + amount
                 if sum_g > 3000:
-                    unknown.append(f"{foods[key].name}合计超过 3000 g，请核对份量")
+                    missing.append(f"{foods[key].name}合计超过 3000 g，请核对份量")
                     continue
                 if key not in grams:
                     ranges[key] = bounds
@@ -90,7 +89,8 @@ def resolve_photo(result, foods, filename):
                     ranges[key] = None
                 grams[key] = sum_g
         return {"suggested_grams": grams, "portion_ranges": ranges, "alternatives": list(dict.fromkeys(alternatives)),
-                "unmatched": list(dict.fromkeys(u for u in unknown if u))}
+                "uncertain_items": list(result.uncertain_items), "unmatched_foods": list(dict.fromkeys(missing)),
+                "unmatched": list(dict.fromkeys(u for u in [*result.uncertain_items, *missing] if u))}
 
     whole, parts = variant(False), variant(True)
     draft = make_draft("photo", filename, whole["suggested_grams"], whole["unmatched"])
@@ -117,6 +117,8 @@ def prepare_photo(photo):
 
 
 def identify_photo(jpeg, filename, foods, *, api_key=None, use_qwen=False, portion_hint=""):
+    from langchain_openai import ChatOpenAI
+
     instructions = (
         "Identify plated foods from ANY cuisine in English and Chinese for a searchable nutrition database. "
         "Give a common dish name (e.g. burrito bowl), plus recognizable components separately. Group visible "

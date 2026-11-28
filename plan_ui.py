@@ -34,6 +34,8 @@ def profile_form(profile, today, db_path, public_demo):
             goal = st.selectbox("体重目标", list(GOALS), index=list(GOALS).index(profile.goal),
                                 format_func=GOALS.get)
         remember = False
+        if public_demo and st.session_state.get("diary_token"):
+            st.caption("保存后，下次用这台设备的同一浏览器可找回个人计划。")
         if public_demo and not st.session_state.get("diary_token") and not st.session_state.get("device_storage_blocked"):
             remember = st.checkbox("在这台设备记住我的记录",
                                    help="适合自己的手机。同一浏览器用随机标识找回云端临时记录；可在个人设置中清除。")
@@ -60,6 +62,7 @@ def profile_form(profile, today, db_path, public_demo):
             st.session_state.edit_profile = False
             st.rerun()
     elif st.button("先试试记餐"):
+        st.session_state.edit_profile = False
         st.session_state.guest = True
         st.rerun()
 
@@ -153,6 +156,8 @@ def settings(profile, db_path, public_demo):
                 if public_demo:
                     forget_diary()
                 for key in ("guest", "saved", "draft", "edit_profile"):
+                    st.session_state.pop(key, None)
+                for key in ("receipt", "capture_ack", "active_draft"):
                     st.session_state.pop(key, None)
                 st.session_state.notice = "这份档案、训练安排和餐食记录已清除。"
                 st.rerun()

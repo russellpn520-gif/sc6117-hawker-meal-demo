@@ -1,0 +1,18 @@
+<div class="capture">
+  <button type="button" class="take">拍下这餐</button>
+  <button type="button" class="album">从相册选</button>
+  <input type="file" accept="image/*" capture="environment" class="camera-file" hidden>
+  <input type="file" accept="image/*" class="album-file" hidden>
+  <p role="status" aria-live="polite"></p>
+</div>
+<style>
+  .capture {display:grid;grid-template-columns:1.6fr 1fr;gap:.55rem;font-family:inherit}
+  .capture button {min-height:48px;font:600 1rem/1.2 system-ui,sans-serif;border:1px solid #547e6c;
+    border-radius:12px;cursor:pointer;padding:.6rem .75rem}
+  .take {color:white;background:#205b46}
+  .album {color:#225540;background:#f1f6ee}
+  .capture button:focus-visible {outline:3px solid #bc8b35;outline-offset:2px}
+  .capture button:disabled {opacity:.55}
+  .capture p {grid-column:1/-1;font:400 .9rem/1.35 system-ui,sans-serif;margin:0}
+  .capture p:empty {display:none}
+</style>

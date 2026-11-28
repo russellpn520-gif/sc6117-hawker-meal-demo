@@ -1,4 +1,6 @@
 import json
+import base64
+import binascii
 import os
 import re
 import sqlite3
@@ -6,6 +8,7 @@ from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
+from time import time
 
 from planning import Profile
 from catalog import NUTRIENTS, ROOT, load_foods
@@ -109,8 +112,144 @@ def open_db(db_path=None):
         CREATE TABLE IF NOT EXISTS workouts (day TEXT PRIMARY KEY);
         CREATE TABLE IF NOT EXISTS rest_days (day TEXT PRIMARY KEY);
         CREATE TABLE IF NOT EXISTS profile (id INTEGER PRIMARY KEY CHECK(id = 1), data TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS pending (
+            id TEXT PRIMARY KEY, captured_at TEXT NOT NULL, data TEXT NOT NULL,
+            photo BLOB NOT NULL, lease TEXT, lease_until REAL
+        );
+        CREATE TABLE IF NOT EXISTS discarded (id TEXT PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS draft_sync (
+            id INTEGER PRIMARY KEY CHECK(id = 1), generation TEXT NOT NULL,
+            revision INTEGER NOT NULL, hydrated INTEGER NOT NULL
+        );
+        INSERT OR IGNORE INTO draft_sync VALUES (1, lower(hex(randomblob(16))), 0, 0);
+        CREATE TRIGGER IF NOT EXISTS pending_added AFTER INSERT ON pending BEGIN
+            UPDATE draft_sync SET revision = revision + 1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS pending_changed AFTER UPDATE OF data ON pending BEGIN
+            UPDATE draft_sync SET revision = revision + 1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS pending_removed AFTER DELETE ON pending BEGIN
+            UPDATE draft_sync SET revision = revision + 1;
+        END;
     """)
     return db
+
+
+def _pending_data(draft, photo):
+    data = {k: v for k, v in draft.items() if k not in {"photo", "captured_at", "id"}}
+    data.setdefault("status", "queued" if photo else "ready")
+    return json.dumps(data, ensure_ascii=False)
+
+
+def create_pending(draft, photo=b"", *, db_path=None):
+    now = datetime.now(SG_TIME)
+    when = now
+    if draft.get("captured_at"):
+        try:
+            supplied = datetime.fromisoformat(draft["captured_at"])
+            if supplied.tzinfo and now - timedelta(days=365) <= supplied <= now + timedelta(minutes=5):
+                when = supplied.astimezone(SG_TIME)
+        except (TypeError, ValueError):
+            pass
+    with closing(open_db(db_path)) as db, db:
+        return db.execute("""
+            INSERT OR IGNORE INTO pending(id, captured_at, data, photo)
+            SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM meals WHERE id = ?)
+              AND NOT EXISTS (SELECT 1 FROM discarded WHERE id = ?)
+        """, (draft["id"], when.isoformat(), _pending_data(draft, photo), photo, draft["id"], draft["id"])).rowcount == 1
+
+
+def _pending_record(row):
+    key, captured_at, data, photo = row
+    return {**json.loads(data), "id": key, "captured_at": captured_at, "photo": photo}
+
+
+def list_pending(*, db_path=None):
+    with closing(open_db(db_path)) as db:
+        return [_pending_record(row) for row in db.execute(
+            "SELECT id, captured_at, data, photo FROM pending ORDER BY captured_at DESC, id")]
+
+
+def get_pending(key, *, db_path=None):
+    with closing(open_db(db_path)) as db:
+        row = db.execute("SELECT id, captured_at, data, photo FROM pending WHERE id = ?", (key,)).fetchone()
+    return _pending_record(row) if row else None
+
+
+def update_pending(draft, *, db_path=None):
+    """A manual edit takes priority over an in-flight photo recognition."""
+    with closing(open_db(db_path)) as db, db:
+        return db.execute("UPDATE pending SET data = ?, lease = NULL, lease_until = NULL WHERE id = ?",
+                          (_pending_data(draft, draft.get("photo")), draft["id"])).rowcount == 1
+
+
+def claim_pending(key, *, db_path=None):
+    """Allow at most one worker to recognize this dish during the model timeout."""
+    token = uuid4().hex
+    now = time()
+    with closing(open_db(db_path)) as db, db:
+        changed = db.execute("""
+            UPDATE pending SET lease = ?, lease_until = ? WHERE id = ?
+              AND (lease IS NULL OR lease_until < ?)
+              AND json_extract(data, '$.status') IN ('queued', 'failed')
+        """, (token, now + 120, key, now)).rowcount
+    return token if changed else None
+
+
+def finish_pending(draft, *, claim, db_path=None):
+    with closing(open_db(db_path)) as db, db:
+        return db.execute("""
+            UPDATE pending SET data = ?, lease = NULL, lease_until = NULL WHERE id = ? AND lease = ?
+        """, (_pending_data(draft, draft.get("photo")), draft["id"], claim)).rowcount == 1
+
+
+def discard_pending(key, *, db_path=None):
+    with closing(open_db(db_path)) as db, db:
+        changed = db.execute("DELETE FROM pending WHERE id = ?", (key,)).rowcount
+        if changed:
+            db.execute("INSERT OR IGNORE INTO discarded VALUES (?)", (key,))
+        return bool(changed)
+
+
+def draft_cursor(*, db_path):
+    with closing(open_db(db_path)) as db:
+        return db.execute("SELECT generation, revision, hydrated FROM draft_sync").fetchone()
+
+
+def export_pending(*, db_path):
+    with closing(open_db(db_path)) as db:
+        db.execute("BEGIN")
+        generation, revision = db.execute("SELECT generation, revision FROM draft_sync").fetchone()
+        rows = [{"id": k, "at": at, "data": data, "jpeg": base64.b64encode(photo).decode("ascii")}
+                for k, at, data, photo in db.execute("SELECT id, captured_at, data, photo FROM pending")]
+    return {"generation": generation, "revision": revision, "rows": rows}
+
+
+def restore_pending(rows, *, db_path):
+    """Recover only this device's unfinished meals after a cloud disk reset."""
+    with closing(open_db(db_path)) as db, db:
+        db.execute("BEGIN IMMEDIATE")
+        if db.execute("SELECT hydrated FROM draft_sync").fetchone()[0]:
+            return
+        for row in rows if isinstance(rows, list) else ():
+            try:
+                key, at, raw, jpeg = (row[c] for c in ("id", "at", "data", "jpeg"))
+                if not re.fullmatch(r"[a-f0-9-]{32,36}", key) or len(raw) > 250_000 or len(jpeg) > 3_000_000:
+                    continue
+                capture = datetime.fromisoformat(at)
+                data = json.loads(raw)
+                if (capture.tzinfo is None or data["status"] not in {"queued", "ready", "failed"}
+                        or not isinstance(data["input"]["suggested_grams"], dict)):
+                    continue
+                photo = base64.b64decode(jpeg, validate=True)
+            except (AttributeError, TypeError, KeyError, ValueError, binascii.Error):
+                continue
+            db.execute("""
+                INSERT OR IGNORE INTO pending(id, captured_at, data, photo)
+                SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM meals WHERE id = ?)
+                  AND NOT EXISTS (SELECT 1 FROM discarded WHERE id = ?)
+            """, (key, at, raw, photo, key, key))
+        db.execute("UPDATE draft_sync SET hydrated = 1")
 
 
 def save_meal(draft, items, *, db_path=None):
@@ -118,12 +257,22 @@ def save_meal(draft, items, *, db_path=None):
         raise ValueError("请至少选一项食物。")
     now = datetime.now(SG_TIME)
     sums = total_nutrients([item["nutrients"] for item in items])
-    payload = [json.dumps(part, ensure_ascii=False) for part in (draft["input"], items, sums)]
     with closing(open_db(db_path)) as db, db:
-        db.execute("""
+        db.execute("BEGIN IMMEDIATE")
+        saved = db.execute("SELECT captured_at FROM pending WHERE id = ?", (draft["id"],)).fetchone()
+        if not saved and ("captured_at" in draft or
+                          db.execute("SELECT 1 FROM discarded WHERE id = ?", (draft["id"],)).fetchone()):
+            return False
+        day = datetime.fromisoformat(saved[0]).astimezone(SG_TIME).date() if saved else now.date()
+        original = {**draft["input"], "captured_at": saved[0]} if saved else draft["input"]
+        payload = [json.dumps(part, ensure_ascii=False) for part in (original, items, sums)]
+        inserted = db.execute("""
             INSERT INTO meals(id, day, confirmed_at, input, items, totals)
             VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING
-        """, (draft["id"], now.date().isoformat(), now.isoformat(), *payload))
+        """, (draft["id"], day.isoformat(), now.isoformat(), *payload)).rowcount
+        if saved:
+            db.execute("DELETE FROM pending WHERE id = ?", (draft["id"],))
+        return bool(inserted)
 
 
 def list_meals(day, *, db_path=None):
@@ -199,6 +348,8 @@ def move_workout(profile, origin, destination, *, db_path=None):
 
 def clear_diary(*, db_path=None):
     with closing(open_db(db_path)) as db, db:
+        db.execute("DELETE FROM pending")
+        db.execute("DELETE FROM discarded")
         db.execute("DELETE FROM meals")
         db.execute("DELETE FROM workouts")
         db.execute("DELETE FROM rest_days")
