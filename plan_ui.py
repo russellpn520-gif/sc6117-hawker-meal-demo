@@ -7,7 +7,9 @@ import streamlit as st
 from device_diary import forget_diary, remember_diary
 from i18n import tr
 from meals import clear_diary, move_workout, planned_days, save_profile
-from planning import ACTIVITIES, GOALS, SEXES, Profile, calorie_balance, day_plan, span
+from planning import ACTIVITIES, GOALS, SEXES, Profile, TrainingPreferences, calorie_balance, day_plan, span, valid_training_move
+from training_coach import (DAYS, EXERCISES, read_logs, save_training_log, save_training_preferences,
+                            session_lines, training_context)
 
 
 class ActivityText(NamedTuple):
@@ -94,11 +96,10 @@ def profile_form(profile, today, db_path, public_demo):
                                    key="plan_sex", default=profile.sex if profile else None,
                                    help=tr("选择后显示单一估值，留空会显示两种公式的估算范围。",
                                            "Choose one for a single estimate, or leave blank to see a range."))
-        goal = "maintain"
-        if profile:
-            goal_labels = {key: goal_label(key) for key in GOALS}
-            goal = st.selectbox(tr("体重目标", "Weight goal"), list(GOALS), index=list(GOALS).index(profile.goal),
-                                format_func=goal_labels.__getitem__, key="plan_goal")
+        goal_labels = {key: goal_label(key) for key in GOALS}
+        goal = st.selectbox(tr("体重目标", "Weight goal"), list(GOALS),
+                            index=list(GOALS).index(profile.goal) if profile else 0,
+                            format_func=goal_labels.__getitem__, key="plan_goal")
         remember = False
         if public_demo and st.session_state.get("diary_token"):
             st.caption(tr("保存后，下次用这台设备的同一浏览器可找回个人计划。",
@@ -118,7 +119,9 @@ def profile_form(profile, today, db_path, public_demo):
                        "The energy plan is for adults. You can still log meals."))
         else:
             updated = Profile(nickname=nickname, age=age, height_cm=height, weight_kg=weight,
-                              activity=activity, sex=sex, goal=goal, start=profile.start if profile else today)
+                              activity=activity, sex=sex, goal=goal, start=profile.start if profile else today,
+                              training=profile.training if profile else None,
+                              training_history=profile.training_history if profile else ())
             if min(updated.resting_kcal) <= 0:
                 st.warning(tr("请核对身高、体重及单位，这组输入无法估算静息代谢。",
                               "Check your height and weight, including the units, so we can estimate your resting energy."))
@@ -199,7 +202,7 @@ def training_plan(profile, today, days, db_path):
         origin, destination = (today, tomorrow) if today in days else (tomorrow, today)
         label = (tr("把今天的训练移到明天", "Move today’s workout to tomorrow") if origin == today
                  else tr("把明天的训练移到今天", "Move tomorrow’s workout to today"))
-        if st.button(label, type="primary"):
+        if valid_training_move(profile, origin, destination, set(days) - {origin}) and st.button(label, type="primary"):
             _change_date(profile, origin, destination, db_path)
     upcoming = [today + timedelta(days=i) for i in range(14)]
     active = [d for d in upcoming if d in days]
@@ -211,14 +214,127 @@ def training_plan(profile, today, days, db_path):
                  or tr("接下来两周没有训练。", "No workouts scheduled for the next two weeks."))
         if active and rest:
             date_labels = {d: month_day(d) for d in upcoming}
-            with st.form("reschedule"):
-                origin = st.selectbox(tr("把哪天的训练移走？", "Which workout do you want to move?"),
-                                      active, format_func=date_labels.__getitem__, key="reschedule_origin")
-                destination = st.selectbox(tr("改到哪个休息日？", "Choose a rest day to train instead"),
-                                           rest, format_func=date_labels.__getitem__, key="reschedule_destination")
-                submit = st.form_submit_button(tr("确认改期", "Confirm new date"))
-            if submit:
-                _change_date(profile, origin, destination, db_path)
+            origin = st.selectbox(tr("把哪天的训练移走？", "Which workout do you want to move?"),
+                                  active, format_func=date_labels.__getitem__, key="reschedule_origin")
+            options = [d for d in rest if valid_training_move(profile, origin, d, set(days) - {origin})]
+            if not options:
+                st.caption(tr("这两周暂无符合可用日期和恢复间隔的空档。",
+                              "There is no other date in this period that fits your availability and recovery days."))
+            else:
+                with st.form("reschedule"):
+                    destination = st.selectbox(tr("改到哪个休息日？", "Choose a rest day to train instead"),
+                                               options, format_func=date_labels.__getitem__, key="reschedule_destination")
+                    submit = st.form_submit_button(tr("确认改期", "Confirm new date"))
+                if submit:
+                    _change_date(profile, origin, destination, db_path)
+    _strength_panel(profile, today, db_path)
+
+
+def _strength_panel(profile, today, db_path):
+    prefs = profile.training
+    with st.expander(tr("设置力量训练", "Strength training setup"),
+                     expanded=bool(st.session_state.pop("edit_training_setup", False))):
+        with st.form("training_availability"):
+            labels = {i: tr("周" + name[0], name[1]) for i, name in enumerate(DAYS)}
+            weekdays = st.multiselect(tr("一周哪几天有空？", "Which weekdays are available?"), list(labels),
+                                      default=list(prefs.weekdays) if prefs else [], format_func=labels.__getitem__)
+            gear = {"bodyweight": tr("徒手", "Bodyweight"), "dumbbells": tr("徒手和哑铃", "Bodyweight and dumbbells")}
+            equipment = st.selectbox(tr("可用器械", "Available equipment"), list(gear), format_func=gear.__getitem__,
+                                     index=int(bool(prefs and prefs.equipment == "dumbbells")))
+            minutes = st.select_slider(tr("每次可用时间（分钟）", "Minutes available per workout"), [10, 20, 30],
+                                       value=prefs.minutes if prefs else 20)
+            st.caption(tr("从今天起安排力量训练，已记过今天的训练则从明天开始。训练间隔恢复日，与新时间冲突的改期会更新。",
+                          "The schedule starts today, or tomorrow if today’s workout is logged. It leaves days for recovery. "
+                          "Earlier reschedules that conflict with the new availability will be updated."))
+            if st.form_submit_button(tr("应用训练安排", "Apply training schedule")):
+                if not weekdays:
+                    st.warning(tr("请选择至少一个可训练日。", "Choose at least one available day."))
+                else:
+                    new = TrainingPreferences(equipment=equipment, weekdays=weekdays, minutes=minutes, since=today)
+                    save_training_preferences(profile, new, db_path=db_path)
+                    st.rerun()
+    if not prefs:
+        return
+    lang = tr("zh", "en")
+    context = training_context(profile, today, db_path=db_path, lang=lang)
+    session = next((s for s in context["sessions"] if s["exercises"]), None)
+    if session:
+        st.markdown("**" + tr("本次力量训练", "Your strength session") + " · " + session["date"] + "**")
+        for line in session_lines(session, lang):
+            st.write(line)
+        st.caption(tr("先轻松热身，组间充分休息，按可用时间结束。有疼痛、孕期或健康状况时请先咨询专业人员。",
+                      "Warm up gently, rest between sets and finish within the time available. "
+                      "For pain, pregnancy or health conditions, consult a qualified professional."))
+        with st.expander(tr("进度与训练依据", "Progression and sources")):
+            st.caption(tr("连续两次轻松完成目标后可增加一次重复。漏练后从较轻的训练恢复；连续两次吃力或第四周减量。重量沿用实际记录。",
+                          "Two comfortable completions can earn one extra rep. A missed session eases you back in; "
+                          "two difficult sessions or week four trigger a lighter session. Weights come from your own log."))
+            st.markdown("[NHS · Strength exercises](https://www.nhs.uk/live-well/exercise/strength-exercises/)")
+    _training_log_ui(profile, today, db_path, lang)
+
+
+def _training_log_ui(profile, today, db_path, lang):
+    start = max(profile.start, today - timedelta(days=13))
+    eligible = sorted((d for d in planned_days(profile, start, today, db_path=db_path) if profile.training_for(d)), reverse=True)
+    recent = read_logs(start, today, db_path=db_path)
+    records = {r["date"]: r for r in recent}
+    with st.expander(tr("记录训练或漏练", "Log a workout or missed session")):
+        if not eligible:
+            st.caption(tr("第一个训练日到来后就可以在这里记录。", "You can log your first workout on its scheduled date."))
+        else:
+            day = st.selectbox(tr("训练日期", "Workout date"), eligible, format_func=str, key="workout_log_day")
+            session = training_context(profile, day, db_path=db_path, lang=lang)["sessions"][0]
+            existing = records.get(day.isoformat(), {})
+            statuses = {"comfortable": tr("顺利完成", "Comfortable"), "challenging": tr("吃力或未完成目标", "Challenging or incomplete"),
+                        "missed": tr("这次漏练", "Missed")}
+            status = st.radio(tr("这次训练怎么样？", "How did it go?"), list(statuses), horizontal=True,
+                              index=list(statuses).index(existing.get("status", "comfortable")), format_func=statuses.__getitem__,
+                              key=f"training-result-{day}")
+            with st.form(f"workout-entry-{day}-{status}"):
+                entries = {}
+                if status != "missed":
+                    st.caption(tr("每组实做次数用逗号隔开；没做的动作留空。",
+                                  "Enter the reps you actually did in each set, separated by commas. Leave skipped exercises blank."))
+                    for ex in session["exercises"]:
+                        key = ex["id"]
+                        saved = existing.get("actuals", {}).get(key, [])
+                        reps = st.text_input(ex["name"] + tr(" · 每组次数", " · reps per set"),
+                                             value=", ".join(str(s["reps"]) for s in saved), placeholder="8, 7",
+                                             max_chars=100)
+                        loads = ""
+                        if key == "curl":
+                            loads = st.text_input(tr("每只哑铃重量（kg，每组一个数或共用一个数）",
+                                                     "Weight per dumbbell (kg, one value or one per set)"),
+                                                  value=", ".join(f"{s['kg']:g}" for s in saved), placeholder="2", max_chars=100)
+                        entries[key] = (reps, loads)
+                if st.form_submit_button(tr("保存训练记录", "Save workout log")):
+                    try:
+                        actuals = {}
+                        for key, (reps, loads) in entries.items():
+                            if not reps.strip():
+                                continue
+                            rep_list = [int(v) for v in re.split("[,，]", reps)]
+                            kg_list = [float(v) for v in re.split("[,，]", loads)] if key == "curl" else [0]
+                            if len(kg_list) == 1:
+                                kg_list *= len(rep_list)
+                            if len(kg_list) != len(rep_list):
+                                raise ValueError("sets")
+                            actuals[key] = [{"reps": r, "kg": kg} for r, kg in zip(rep_list, kg_list)]
+                        save_training_log(profile, day, today, status, actuals, db_path=db_path)
+                    except (TypeError, ValueError):
+                        st.warning(tr("请核对每组实做次数和哑铃重量，或选择「这次漏练」。",
+                                      "Check actual reps and dumbbell weights, or select Missed."))
+                    else:
+                        st.session_state.notice = tr("训练记录已保存。", "Workout logged.")
+                        st.rerun()
+        if recent:
+            for record in reversed(recent[-4:]):
+                lines = []
+                for key, sets in record["actuals"].items():
+                    name = EXERCISES[key][lang == "en"]
+                    numbers = ", ".join(f"{s['reps']} × {s['kg']:g} kg" if key == "curl" else str(s["reps"]) for s in sets)
+                    lines.append(f"{name} ({numbers})")
+                st.caption(record["date"] + " · " + (" / ".join(lines) if lines else tr("漏练", "Missed")))
 
 
 def calendar_for_view(profile, today, db_path):
@@ -252,12 +368,14 @@ def settings(profile, db_path, public_demo):
                            "should tailor these demo targets to their training load.") +
                         " [Cronometer](https://support.cronometer.com/hc/en-us/articles/31974307318420-Energy-Expenditure)"
                         " · [Polar](https://support.polar.com/uk-en/support/what_is_my_training_background)")
-            st.markdown(tr("蛋白质按体重和运动习惯估算，训练日每公斤上调 0.1 g。训练建议从熟悉的活动开始。"
+            st.markdown(tr("蛋白质按体重和运动习惯估算，训练日每公斤上调 0.1 g。经常运动且制定力量计划的成年人选择温和增减重时，演示基准为每日每公斤至少 1.3 g。训练建议从熟悉的活动开始。"
                            " 孕哺期、康复期或有特殊营养需求时，可使用记餐功能，并向专业人员确认个人目标。",
                            "Protein targets depend on body weight and activity level, with an extra 0.1 g per kg "
-                           "on training days. Start with familiar activities. If you are pregnant, breastfeeding, "
+                           "on training days. For regularly active adults using the strength plan with a gradual weight-change goal, "
+                           "the demo uses a starting estimate of at least 1.3 g/kg daily. Start with familiar activities. If you are pregnant, breastfeeding, "
                            "recovering, or have specific dietary needs, ask a health professional about your goals.") +
-                        " [HealthHub](https://www.healthhub.sg/well-being-and-lifestyle/food-diet-and-nutrition/why_protein_is_important)")
+                        " [HealthHub](https://www.healthhub.sg/well-being-and-lifestyle/food-diet-and-nutrition/why_protein_is_important)"
+                        " · [NIH ODS](https://ods.od.nih.gov/factsheets/ExerciseAndAthleticPerformance-HealthProfessional/)")
         if public_demo:
             if st.session_state.get("device_storage_blocked"):
                 st.caption(tr("浏览器限制了设备存储，本次仅使用当前会话。",
@@ -276,7 +394,7 @@ def settings(profile, db_path, public_demo):
                 clear_diary(db_path=db_path)
                 if public_demo:
                     forget_diary()
-                for key in ("guest", "saved", "draft", "edit_profile"):
+                for key in ("guest", "saved", "draft", "edit_profile", "mituan_state", "edit_training_setup"):
                     st.session_state.pop(key, None)
                 for key in ("receipt", "capture_ack", "active_draft"):
                     st.session_state.pop(key, None)

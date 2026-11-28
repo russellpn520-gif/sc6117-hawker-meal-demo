@@ -285,14 +285,30 @@ def save_meal(draft, items, *, db_path=None):
 
 
 def list_meals(day, *, db_path=None):
+    return list_meals_between(day, day, db_path=db_path)
+
+
+def list_meals_between(start, end, *, db_path=None):
     with closing(open_db(db_path)) as db:
         records = db.execute("""
-            SELECT confirmed_at, input, items, totals FROM meals
-            WHERE day = ? ORDER BY confirmed_at DESC
-        """, (day.isoformat(),)).fetchall()
-    return [{"at": datetime.fromisoformat(at), "input": json.loads(raw),
+            SELECT day, confirmed_at, input, items, totals FROM meals
+            WHERE day BETWEEN ? AND ? ORDER BY confirmed_at DESC
+        """, (start.isoformat(), end.isoformat())).fetchall()
+    return [{"day": date.fromisoformat(day), "at": datetime.fromisoformat(at), "input": json.loads(raw),
              "items": json.loads(items), "totals": json.loads(totals)}
-            for at, raw, items, totals in records]
+            for day, at, raw, items, totals in records]
+
+
+def coverage_status(record):
+    """Describe the evidence stored at confirmation without rewriting an old meal."""
+    source = record.get("input", {})
+    if "partial_record" in source:
+        return "partial" if source["partial_record"] else "complete"
+    if source.get("method") == "photo" and source.get("unmatched_foods"):
+        confirmed = {item["food_id"] for item in record.get("items", [])}
+        if confirmed and confirmed.issubset(source.get("suggested_grams", {})):
+            return "legacy_review"
+    return "complete"
 
 
 def workout_days(start, end, *, db_path=None):
@@ -339,13 +355,26 @@ def planned_days(profile, start, end, *, db_path=None):
         return _planned_days(db, profile, start, end)
 
 
-def move_workout(profile, origin, destination, *, db_path=None):
+def move_workout(profile, origin, destination, *, db_path=None, require_current_profile=False, expected_targets=None):
+    from planning import move_targets, valid_training_move
+    from training_coach import already_logged
+
     if origin == destination:
         return False
     with closing(open_db(db_path)) as db, db:
         db.execute("BEGIN IMMEDIATE")
-        active = _planned_days(db, profile, min(origin, destination), max(origin, destination))
-        if origin not in active or destination in active:
+        current = db.execute("SELECT data FROM profile WHERE id=1").fetchone()
+        if require_current_profile and (not current or Profile.model_validate_json(current[0]) != profile):
+            return False
+        if current:
+            profile = Profile.model_validate_json(current[0])
+        active = _planned_days(db, profile, profile.week_start(min(origin, destination)) - timedelta(days=1),
+                               profile.week_start(max(origin, destination)) + timedelta(days=7))
+        if origin not in active or destination in active or not valid_training_move(profile, origin, destination, active - {origin}):
+            return False
+        if already_logged(db, origin) or already_logged(db, destination):
+            return False
+        if expected_targets is not None and move_targets(profile, origin, destination, active) != expected_targets:
             return False
         old, new = (origin.isoformat(),), (destination.isoformat(),)
         db.execute("DELETE FROM workouts WHERE day = ?", old)
@@ -364,3 +393,5 @@ def clear_diary(*, db_path=None):
         db.execute("DELETE FROM rest_days")
         db.execute("DELETE FROM profile")
         db.execute("DELETE FROM photo_access")
+        db.execute("DROP TABLE IF EXISTS nutrition_preferences")
+        db.execute("DROP TABLE IF EXISTS training_log")

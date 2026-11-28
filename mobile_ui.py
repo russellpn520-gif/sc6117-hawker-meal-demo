@@ -5,7 +5,7 @@ from datetime import datetime
 import streamlit as st
 
 from i18n import tr, food_name
-from meals import SG_TIME, load_foods, total_nutrients
+from meals import SG_TIME, coverage_status, load_foods, total_nutrients
 from planning import span
 
 
@@ -98,18 +98,6 @@ def apply_mobile_style():
       }
     </style>
     """)
-
-
-def coverage_status(record):
-    """Describe the evidence stored at confirmation without rewriting an old meal."""
-    source = record.get("input", {})
-    if "partial_record" in source:
-        return "partial" if source["partial_record"] else "complete"
-    if source.get("method") == "photo" and source.get("unmatched_foods"):
-        confirmed = {item["food_id"] for item in record.get("items", [])}
-        if confirmed and confirmed.issubset(source.get("suggested_grams", {})):
-            return "legacy_review"
-    return "complete"
 
 
 def coverage_note(partial_count, legacy_count):

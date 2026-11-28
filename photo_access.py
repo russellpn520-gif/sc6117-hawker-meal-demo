@@ -34,7 +34,7 @@ def _device_authorized(code, device, *, grant=False):
     return bool(row and hmac.compare_digest(proof, row[0]))
 
 
-def _local_photo_key():
+def _local_photo_key(purpose="photo"):
     try:
         key = read_api_key()
     except (OSError, UnicodeError):
@@ -42,8 +42,9 @@ def _local_photo_key():
     if key or sys.platform != "win32":
         return key
     with st.expander(tr("配置本机 OpenAI 密钥", "Set up a local OpenAI key")):
-        with st.form("local_openai_key", clear_on_submit=True):
-            value = st.text_input("OpenAI API key", type="password", autocomplete="off")
+        with st.form(f"local_openai_key_{purpose}", clear_on_submit=True):
+            value = st.text_input("OpenAI API key", type="password", autocomplete="off",
+                                  key=f"local_openai_input_{purpose}")
             if st.form_submit_button(tr("保存密钥", "Save key")):
                 try:
                     save_windows_key(value)
@@ -55,29 +56,41 @@ def _local_photo_key():
 
 
 def photo_api_key(*, public_demo):
+    return _team_api_key(public_demo, coach=False)
+
+
+def coach_api_key(*, public_demo):
+    return _team_api_key(public_demo, coach=True)
+
+
+def _team_api_key(public_demo, *, coach):
     local_only = not public_demo and st.get_option("server.address") in {"127.0.0.1", "::1", "localhost"}
     if local_only:
-        key = _local_photo_key()
+        key = _local_photo_key("coach" if coach else "photo")
         if not key:
-            st.info(tr("照片已保存。请配置 OpenAI 密钥，或直接填写菜名。",
-                       "Photo saved. Set up an OpenAI key or enter the food names below."))
+            st.info(tr("请配置 OpenAI 密钥以启用自由提问，快捷问题可以直接使用。", "Set up an OpenAI key for free-text questions. Quick actions are available.")
+                    if coach else tr("照片已保存。请配置 OpenAI 密钥，或直接填写菜名。",
+                                     "Photo saved. Set up an OpenAI key or enter the food names below."))
         return key
 
     get_setting = _cloud_secret if public_demo else local_setting
     key, code = get_setting("OPENAI_API_KEY"), get_setting("TEAM_PHOTO_CODE")
     if not key or len(code) < 12 or code == key:
-        st.info(tr("照片已保存。组员识别尚未配置，可先按菜名补记。",
-                   "Photo saved. Team scanning is not configured yet. You can still log the foods by name."))
+        st.info(tr("自由提问尚未配置，可以先使用快捷问题。", "Free-text questions are not configured yet. Use the quick actions.")
+                if coach else tr("照片已保存。组员识别尚未配置，可先按菜名补记。",
+                                 "Photo saved. Team scanning is not configured yet. You can still log the foods by name."))
         return ""
     device = st.session_state.get("diary_token")
     if _device_authorized(code, device):
         return key
-    st.caption(tr("照片已存为草稿。组员输入拍照码后会发送给 OpenAI 识别，也可在下方填写菜名。",
-                  "Your photo is saved as a draft. Use the team code to send it to OpenAI, or enter the foods below."))
-    with st.form("unlock_team_photo", clear_on_submit=True):
+    st.caption(tr("使用组内拍照码启用自由提问。快捷问题免费。", "Use your team's photo code to enable free-text questions. Quick actions are free.")
+               if coach else tr("照片已存为草稿。组员输入拍照码后会发送给 OpenAI 识别，也可在下方填写菜名。",
+                                "Your photo is saved as a draft. Use the team code to send it to OpenAI, or enter the foods below."))
+    with st.form("unlock_team_coach" if coach else "unlock_team_photo", clear_on_submit=True):
         entered = st.text_input(tr("组员拍照码", "Team photo code"), type="password", max_chars=128,
-                                autocomplete="off", key="photo_code_input")
-        if st.form_submit_button(tr("启用拍照识别", "Enable photo scanning")):
+                                autocomplete="off", key="coach_code_input" if coach else "photo_code_input")
+        label = tr("启用自由提问", "Enable free-text questions") if coach else tr("启用拍照识别", "Enable photo scanning")
+        if st.form_submit_button(label):
             if hmac.compare_digest(code.encode(), entered.strip().encode()):
                 _device_authorized(code, device, grant=True)
                 st.rerun()

@@ -1,8 +1,9 @@
 from dataclasses import dataclass
 from datetime import date, timedelta
+from itertools import combinations
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,46 @@ GOALS = {"maintain": "维持体重", "lose": "温和减脂", "gain": "温和增�
 SEXES = {"female": "女性", "male": "男性"}
 
 
+class TrainingPreferences(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    equipment: Literal["bodyweight", "dumbbells"] = "bodyweight"
+    weekdays: tuple[int, ...] = Field(min_length=1, max_length=7)
+    minutes: Literal[10, 20, 30] = 20
+    since: date
+
+    @field_validator("weekdays")
+    @classmethod
+    def valid_weekdays(cls, days):
+        if any(day not in range(7) for day in days) or len(days) != len(set(days)):
+            raise ValueError("Choose distinct weekdays from Monday (0) to Sunday (6).")
+        return tuple(sorted(days))
+
+    def strength_days(self, activity):
+        """Choose the most spread-out available days, including Sunday/Monday recovery."""
+        limit = min(3, len(ACTIVITIES[activity].training_offsets), len(self.weekdays))
+        for count in range(limit, 0, -1):
+            best = None
+            best_gap = 1
+            for candidate in combinations(self.weekdays, count):
+                gaps = [b - a for a, b in zip(candidate, candidate[1:])]
+                smallest = min([7 + candidate[0] - candidate[-1], *gaps])
+                if smallest > best_gap:
+                    best, best_gap = candidate, smallest
+            if best is not None:
+                return best
+        return ()
+
+
+def valid_training_move(profile, origin, destination, neighbors):
+    prefs = profile.training
+    if not prefs or destination < prefs.since:
+        return True
+    return (destination.weekday() in prefs.weekdays
+            and destination - timedelta(days=1) not in neighbors
+            and destination + timedelta(days=1) not in neighbors)
+
+
 class Profile(BaseModel):
     model_config = ConfigDict(frozen=True, str_strip_whitespace=True, allow_inf_nan=False)
 
@@ -44,6 +85,8 @@ class Profile(BaseModel):
     sex: Literal["female", "male"] | None = None
     goal: Literal["maintain", "lose", "gain"] = "maintain"
     start: date
+    training: TrainingPreferences | None = None
+    training_history: tuple[TrainingPreferences, ...] = ()
 
     @property
     def goal_factor(self):
@@ -65,7 +108,14 @@ class Profile(BaseModel):
     def week_start(self, day):
         return day - timedelta(days=(day - self.start).days % 7)
 
+    def training_for(self, day):
+        if self.training and day >= self.training.since:
+            return self.training
+        return next((p for p in reversed(self.training_history) if day >= p.since), None)
+
     def scheduled_by_default(self, day):
+        if prefs := self.training_for(day):
+            return day.weekday() in prefs.strength_days(self.activity)
         return day >= self.start and (day - self.start).days % 7 in ACTIVITIES[self.activity].training_offsets
 
 
@@ -92,6 +142,9 @@ def day_plan(profile, day, training_days):
         step = round(average * 0.08 / 7)
         targets.append(average + (7 * int(training) - count) * step)
     coefficient = max(tier.protein_per_kg, 1.2 if profile.age >= 50 else 0.8)
+    if profile.training_for(day) and profile.activity == "regular" and profile.goal_factor != 1:
+        # A small demo adjustment for regular strength training during a weight-change goal.
+        coefficient = max(coefficient, 1.3)
     protein = round(profile.weight_kg * (coefficient + (0.1 if training else 0)))
     return DayPlan(training, tuple(targets), protein)
 
@@ -99,6 +152,12 @@ def day_plan(profile, day, training_days):
 def span(values):
     low, high = (round(n) for n in values)
     return str(low) if low == high else f"{low}–{high}"
+
+
+def move_targets(profile, origin, destination, active):
+    proposed = (active - {origin}) | {destination}
+    return tuple((day_plan(profile, day, active), day_plan(profile, day, proposed))
+                 for day in (origin, destination))
 
 
 def calorie_balance(targets, eaten):

@@ -8,6 +8,7 @@ from uuid import UUID
 import streamlit as st
 
 from photo_access import photo_api_key
+from coach_ui import coach_entry
 from device_diary import cloud_diary
 from i18n import food_name, language_switch, tr
 from meal_review import review_meal
@@ -186,6 +187,7 @@ def main(*, public_demo=False):
     db_path = cloud_diary() if public_demo else None
     today = datetime.now(SG_TIME).date()
     profile = get_profile(db_path=db_path)
+    coach_entry(today, db_path, public_demo)
     if notice := st.session_state.pop("notice", None):
         st.info(notice)
     if st.session_state.get("edit_profile"):
