@@ -1,3 +1,6 @@
+from collections import Counter
+from functools import partial
+
 import streamlit as st
 
 from i18n import food_name, source_name, tr
@@ -95,6 +98,39 @@ def _set_main(view, group, candidate):
         choices[group] = candidate
 
 
+def _manual_matches(foods, query):
+    query = query.strip()
+    matches = foods.search(query)
+    if len(query) != 1 or not "\u3400" <= query <= "\u9fff":
+        return matches
+    # The catalog indexes Chinese bigrams. A one-character manual search
+    # should also surface everyday dishes whose displayed name contains it.
+    exact = sorted(foods.exact.get(query, ()), key=foods.priority)
+    common = sorted((key for key in foods.featured if query in foods[key].name),
+                    key=lambda key: (len(foods[key].name), foods.priority(key)))
+    return tuple(dict.fromkeys([*exact, *common, *matches]))[:18]
+
+
+def _food_results(foods, matches, prefix, choose):
+    labels = {key: f"{food_name(foods[key])} · {source_name(foods[key].source_label)}" for key in matches}
+    counts = Counter(labels.values())
+
+    def buttons(keys):
+        for key in keys:
+            label = labels[key]
+            if counts[label] > 1:
+                label += f" · {foods[key].code}"
+            st.button(label, icon=":material/add:", width="stretch", key=f"{prefix}-hit-{key}",
+                      on_click=choose, args=(key,))
+
+    with st.container(key=f"food_hits_{prefix}"):
+        buttons(matches[:3])
+        if len(matches) > 3:
+            extra = len(matches) - 3
+            with st.expander(tr(f"更多匹配（{extra}）", f"More matches ({extra})")):
+                buttons(matches[3:])
+
+
 def _main_review(panel, original, view, foods):
     """Allow one dish to replace its matched components, keeping other plates and sides."""
     groups = original.get("main_dishes", [])
@@ -143,14 +179,9 @@ def _main_review(panel, original, view, foods):
             query = st.text_input(tr("搜索整道菜名", "Search for a whole dish"), key=prefix + "-search",
                                   placeholder=tr("例如：福建炒虾面", "e.g. Hokkien mee"))
             if query.strip():
-                matches = foods.search(query)
+                matches = _manual_matches(foods, query)
                 if matches:
-                    labels = {k: f"{food_name(foods[k])} · {source_name(foods[k].source_label)}" for k in matches}
-                    key = st.selectbox(tr("食物库中的整道菜", "Whole dish in the database"), matches,
-                                       format_func=labels.__getitem__,
-                                       key=prefix + "-select")
-                    st.button(tr("按这道菜计入", "Use this dish"), key=prefix + "-use", on_click=_set_main,
-                              args=(view, group_id, key))
+                    _food_results(foods, matches, prefix, partial(_set_main, view, group_id))
                 else:
                     st.caption(tr("没有匹配，可以换个菜名，或在下方分别补选主食和配料。",
                                   "Try another dish name or match the staple and ingredients below."))
@@ -192,15 +223,12 @@ def _repair_controls(panel, view, rows, foods, selected, main_dishes=()):
                     st.button(label, key=f"{controls}-add-{k}", help=source_name(foods[k].source_label),
                               on_click=_resolve_food, args=(view, row, k, foods))
             with st.expander(tr("查找其他食物", "Look up another food"), expanded=not quick):
-                query = st.text_input(tr("搜索合适的菜名或食材", "Search for a dish or ingredient"), key=f"{controls}-lookup")
+                query = st.text_input(tr("搜索合适的菜名或食材", "Search for a dish or ingredient"), key=f"{controls}-lookup",
+                                      placeholder=tr("例如：蒸鱼、豆腐", "e.g. steamed fish or tofu"))
                 if query.strip():
-                    matches = foods.search(query)
+                    matches = _manual_matches(foods, query)
                     if matches:
-                        labels = {k: f"{food_name(foods[k])} · {source_name(foods[k].source_label)}" for k in matches}
-                        k = st.selectbox(tr("选择对应项", "Choose a matching food"), matches, format_func=labels.__getitem__,
-                                         key=f"{controls}-replacement")
-                        st.button(tr("用这项补记", "Use this food"), key=f"{controls}-use", on_click=_resolve_food,
-                                  args=(view, row, k, foods))
+                        _food_results(foods, matches, controls, partial(_resolve_food, view, row, foods=foods))
                     else:
                         st.caption(tr("暂未搜到，可换个菜名或食材名。", "No matches. Try another dish or ingredient."))
             st.button(tr("这项没吃或不在餐盘里", "I didn't eat this / it wasn't on the plate"), key=f"{controls}-omit", on_click=_resolve_food,

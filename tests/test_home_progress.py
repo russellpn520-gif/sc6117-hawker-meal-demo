@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from streamlit.testing.v1 import AppTest
 
-from meals import create_pending, load_foods, make_draft, portion_items, save_meal, save_profile
+from meals import clear_diary, create_pending, load_foods, make_draft, portion_items, save_meal, save_profile
 from planning import Profile
 
 
@@ -55,3 +55,22 @@ class HomeProgressTests(unittest.TestCase):
             app = self.home()
         self.assertTrue(any("Logged subtotal" in m.value for m in app.markdown))
         self.assertFalse(any("kcal left today" in m.value for m in app.markdown))
+
+    def test_guest_can_continue_to_dinner_and_log_another_meal_after_reopening(self):
+        clear_diary(db_path=self.path)
+        with patch("app.cloud_diary", return_value=self.path):
+            app = self.home()
+            self.assertEqual(app.subheader[0].value, "Log a meal")
+            draft = make_draft("text", "rice", {"white-rice": 100}, [])
+            draft["status"] = "ready"
+            create_pending(draft, db_path=self.path)
+            app.run()
+            self.assertEqual(app.subheader[0].value, "Meal to confirm")
+            self.assertFalse(any(b.key == "home_dinner" for b in app.button))
+            next(b for b in app.button if b.label == "Ate it all · Log meal").click().run()
+            self.assertTrue(any("Meal added to diary" in m.value for m in app.markdown))
+            app = self.home()
+            self.assertFalse(app.exception)
+            self.assertTrue(any("Last meal" in m.value for m in app.markdown))
+            self.assertTrue(any(b.key == "home_dinner" for b in app.button))
+            self.assertTrue(any(e.label == "Log the next meal" for e in app.expander))

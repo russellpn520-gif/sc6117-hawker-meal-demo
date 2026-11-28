@@ -10,16 +10,21 @@
 </div>
 <style>
   .capture {display:grid;grid-template-columns:1.6fr 1fr;gap:.55rem;font-family:inherit}
-  .capture button {min-height:48px;font:600 1rem/1.2 system-ui,sans-serif;border:1px solid #547e6c;
-    border-radius:12px;cursor:pointer;padding:.6rem .75rem}
-  .take {color:white;background:#205b46}
-  .album {color:#225540;background:#f1f6ee}
+  .capture button {min-height:50px;font:650 1rem/1.25 system-ui,sans-serif;border:1px solid #547e6c;
+    border-radius:.8rem;cursor:pointer;padding:.6rem .65rem}
+  .take {color:white;background:#245f47}
+  .album {color:#284d36;background:#eff1e3}
   .capture button:focus-visible {outline:3px solid #bc8b35;outline-offset:2px}
   .capture button:disabled {opacity:.55}
   .capture p {grid-column:1/-1;font:400 .9rem/1.35 system-ui,sans-serif;margin:0}
   .capture p:empty {display:none}
   .scale-hint {grid-column:1/-1;font:.9rem system-ui,sans-serif}
-  .scale-hint summary {cursor:pointer;padding:.4rem 0}
+  .scale-hint summary {display:flex;align-items:center;gap:.4rem;min-height:40px;width:fit-content;
+    cursor:pointer;list-style:none;font-weight:500}
+  .scale-hint summary::-webkit-details-marker {display:none}
+  .scale-hint summary::after {content:"";display:inline-block;width:.42rem;height:.42rem;
+    border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:rotate(45deg) translateY(-2px)}
+  .scale-hint[open] summary::after {transform:rotate(225deg)}
   .scale-hint label {display:grid;gap:.3rem;margin-top:.25rem}
   .scale-input {box-sizing:border-box;width:100%;border:1px solid #86968c;border-radius:.5rem;padding:.55rem;font:1rem system-ui,sans-serif}
 </style>

@@ -409,4 +409,5 @@ def clear_diary(*, db_path=None):
         db.execute("DELETE FROM profile")
         db.execute("DELETE FROM photo_access")
         db.execute("DROP TABLE IF EXISTS nutrition_preferences")
+        db.execute("DROP TABLE IF EXISTS dinner_mode")
         db.execute("DROP TABLE IF EXISTS training_log")

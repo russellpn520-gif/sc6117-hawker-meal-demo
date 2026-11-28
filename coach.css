@@ -64,7 +64,11 @@
 .mituan-intro p {margin:0;}
 .st-key-mituan_actions button, .st-key-mituan_panel button {min-height:44px;}
 .st-key-mituan_panel :is(input,textarea) {font-size:16px;}
-.st-key-mituan_panel {overflow-wrap:anywhere;}
+.st-key-mituan_panel {overflow-wrap:break-word;}
+.st-key-mituan_panel button:focus-visible {
+    outline: 3px solid var(--meal-focus, #5a9874);
+    outline-offset: 2px;
+}
 .stMainBlockContainer:has(.st-key-mituan_dock) {padding-bottom:calc(5rem + var(--mituan-host-clearance) + env(safe-area-inset-bottom, 0px));}
 
 @media (max-width: 640px) {
@@ -87,7 +91,10 @@
         overflow-y: auto;
         padding-bottom: max(.6rem, env(safe-area-inset-bottom, 0px));
         border-radius: 20px 20px 0 0;
+        overscroll-behavior-y: contain;
     }
+    .st-key-mituan_actions {gap: .4rem;}
+    .st-key-mituan_actions .stButton button {padding-inline: .6rem;}
     body:has(.st-key-mituan_panel) .st-key-mituan_dock {visibility:hidden;}
 }
 @keyframes mituan-nod {0%,100% {transform:rotate(0);} 35% {transform:rotate(-9deg) translateY(-1px);} 70% {transform:rotate(5deg);}}

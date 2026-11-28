@@ -436,7 +436,7 @@ def settings(profile, db_path, public_demo):
                 for key in ("guest", "saved", "draft", "edit_profile", "mituan_state", "edit_training_setup",
                             "training_move_preview"):
                     st.session_state.pop(key, None)
-                for key in ("receipt", "capture_ack", "active_draft"):
+                for key in ("receipt", "capture_ack", "active_draft", "section"):
                     st.session_state.pop(key, None)
                 st.session_state.notice = tr("这份档案、训练安排和餐食记录已清除。",
                                              "Your profile, training schedule and meal records have been cleared.")

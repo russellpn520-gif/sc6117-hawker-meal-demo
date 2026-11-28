@@ -8,7 +8,7 @@ from uuid import UUID
 import streamlit as st
 
 from photo_access import photo_api_key
-from coach_ui import coach_entry
+from coach_ui import coach_entry, open_dinner
 from device_diary import cloud_diary
 from i18n import food_name, language_switch, tr
 from meal_review import review_meal
@@ -37,16 +37,16 @@ def capture_meal(db_path, public_demo):
     mode = st.segmented_control(tr("拍什么？", "What are you photographing?"), list(modes),
                                 format_func=modes.__getitem__, default="photo", key="capture_mode",
                                 label_visibility="collapsed") or "photo"
-    if mode == "label":
-        st.caption(tr("拍清营养成分表及份量单位，读数后按实吃量确认。", "Photograph the nutrition panel and its serving units, then enter how much you ate."))
-    else:
-        st.caption(tr("照片由 OpenAI 识别，吃完再确认。", "OpenAI identifies the food in your photo. Confirm after eating."))
-    if public_demo:
-        st.caption(tr("首次使用照片识别需组员访问码。按菜名记餐、日记和训练计划免费使用。",
-                      "Your first photo scan requires the team access code. Logging by name, the diary and training plans are free."))
     result = photo_picker(key="capture_meal", data={"device": device, "mode": mode, "ack": st.session_state.get("capture_ack"),
                                                   "lang": st.session_state.get("ui_lang", "zh")},
                           default={"capture": None}, on_capture_change=lambda: None)
+    if mode == "label":
+        hint = tr("拍清营养成分表和份量单位。", "Include the panel and serving units.")
+    else:
+        hint = tr("先拍照，吃完再确认。", "Take a photo now and confirm after eating.")
+    access = (tr("OpenAI 识别首次需组员码。", "The first OpenAI scan needs a team access code.") if public_demo
+              else tr("照片由 OpenAI 识别。", "OpenAI scans the photo."))
+    st.caption(f"{hint} {access}")
     record = result.capture
     if (not isinstance(record, dict) or record.get("device") != device
             or record.get("id") == st.session_state.get("capture_ack")):
@@ -109,8 +109,10 @@ def wait_for_recognition(key, db_path, api_key):
 def review_pending(draft, db_path, public_demo):
     is_label = draft["input"].get("method") == "label"
     if draft["photo"]:
-        st.image(draft["photo"], width="stretch" if is_label else 220,
-                 alt=tr("包装营养标签", "Package nutrition panel") if is_label else tr("这餐的照片", "Photo of your meal"))
+        with st.expander(tr("查看包装标签", "View package label") if is_label else tr("查看这餐的照片", "View meal photo"),
+                         expanded=is_label):
+            st.image(draft["photo"], width="stretch",
+                     alt=tr("包装营养标签", "Package nutrition panel") if is_label else tr("这餐的照片", "Photo of your meal"))
     status = draft["status"]
     if status == "queued":
         api_key = photo_api_key(public_demo=public_demo)
@@ -140,7 +142,7 @@ def review_pending(draft, db_path, public_demo):
             if saved:
                 st.session_state.receipt = {
                     "totals": total_nutrients([i["nutrients"] for i in items]), "date": draft["captured_at"][:10],
-                    "input": payload["input"], "confirmed_on": datetime.now(SG_TIME).date().isoformat(),
+                    "input": payload["input"], "items": items, "confirmed_on": datetime.now(SG_TIME).date().isoformat(),
                 }
             else:
                 st.session_state.notice = tr("这餐已在另一处处理。", "This meal has already been handled in another tab.")
@@ -156,66 +158,109 @@ def review_pending(draft, db_path, public_demo):
             st.rerun()
 
 
-def draft_label(draft):
+def draft_label(draft, *, time_only=False):
     stamp = datetime.fromisoformat(draft["captured_at"]).astimezone(SG_TIME)
+    when = tr(stamp.strftime("%m/%d %H:%M"), stamp.strftime("%d %b %H:%M"))
+    if time_only:
+        return when
     if draft["input"].get("method") == "label":
         name = (draft["input"].get("label") or {}).get("product_name") or tr("包装营养标签", "Nutrition label")
-        return f"{stamp:%m/%d %H:%M} · {name}"
-    if draft["input"].get("unmatched_foods"):
-        return tr(f"{stamp.month}/{stamp.day} {stamp:%H:%M}　有食物待补选", f"{stamp:%d %b %H:%M} · Food still to match")
-    keys = draft["input"].get("suggested_grams", {})
-    foods = load_foods() if keys else {}
-    names = [food_name(foods[k]) for k in keys if k in foods][:2]
-    return f"{stamp.month}/{stamp.day} {stamp:%H:%M}　" + (tr("、", ", ").join(names) if names else tr("餐食草稿", "Meal draft"))
-
-
-def home(db_path, public_demo, today, profile, plan, eaten, meal_count, partial_count, legacy_count):
-    pending = list_pending(db_path=db_path)
-    receipt = st.session_state.get("receipt")
-    if receipt and receipt.get("confirmed_on", receipt["date"]) == today.isoformat():
-        if pending:
-            st.caption(tr("上一餐已记入日记", "Previous meal saved to your diary"))
-        else:
-            saved_receipt(receipt)
-        if not pending and receipt["date"] != today.isoformat():
-            st.caption(tr(f"用餐日期 {receipt['date']}", f"Meal date · {receipt['date']}"))
-    if pending:
-        count = len(pending)
-        st.subheader(tr("待确认的餐", "Meal to confirm") if count == 1
-                     else tr(f"{count} 餐待确认", f"{count} meals to confirm"))
-        docs = {d["id"]: d for d in pending}
-        chosen = st.session_state.get("active_draft")
-        if chosen not in docs:
-            chosen = pending[0]["id"]
-        if len(docs) > 1:
-            chosen = st.selectbox(tr("选择待确认的餐", "Choose a draft"), list(docs), index=list(docs).index(chosen),
-                                  format_func=lambda i: draft_label(docs[i]))
-        else:
-            st.caption(draft_label(docs[chosen]))
-        review_pending(docs[chosen], db_path, public_demo)
-        with st.expander(tr("再记一餐", "Start another meal")):
-            capture_meal(db_path, public_demo)
-            text_entry(db_path)
+    elif draft["input"].get("unmatched_foods"):
+        name = tr("有食物待补选", "Food still to match")
     else:
+        keys = draft["input"].get("suggested_grams", {})
+        foods = load_foods() if keys else {}
+        names = [food_name(foods[k]) for k in keys if k in foods][:2]
+        name = tr("、", ", ").join(names) or tr("餐食草稿", "Meal draft")
+    return f"{when} · {name}"
+
+
+def meal_entry(db_path, public_demo):
+    capture_meal(db_path, public_demo)
+    with st.expander(tr("按菜名记餐", "Log by food name")):
+        text_entry(db_path)
+    usual_meals_ui(db_path)
+
+
+def home(db_path, public_demo, today, profile, plan, eaten, records, partial_count, legacy_count):
+    pending = list_pending(db_path=db_path)
+    if pending:
+        with st.container(key="home_pending"):
+            pending_review(pending, db_path, public_demo)
+        with st.expander(tr("再记一餐", "Start another meal")):
+            meal_entry(db_path, public_demo)
+        return
+
+    receipt = st.session_state.get("receipt")
+    just_saved = bool(receipt and receipt.get("confirmed_on", receipt["date"]) == today.isoformat())
+    if records or just_saved:
+        with st.container(key="home_after"):
+            saved_receipt(receipt if just_saved else records[0], just_saved=just_saved)
+            if just_saved and receipt["date"] != today.isoformat():
+                st.caption(tr(f"用餐日期 {receipt['date']}", f"Meal date · {receipt['date']}"))
+            if profile:
+                day_strip(today, plan, eaten, len(records), partial_count, legacy_count)
+            st.button(tr("看晚餐建议", "Plan dinner"), on_click=open_dinner, key="home_dinner",
+                      type="primary", width="stretch")
+        with st.expander(tr("记下一餐", "Log the next meal")):
+            meal_entry(db_path, public_demo)
+    else:
+        with st.container(key="home_before"):
+            st.subheader(tr("记录一餐", "Log a meal"))
+            meal_entry(db_path, public_demo)
         if profile:
-            day_strip(today, plan, eaten, meal_count, partial_count, legacy_count)
-        st.subheader(tr("记录一餐", "Log a meal"))
-        capture_meal(db_path, public_demo)
-        with st.expander(tr("按菜名记餐", "Log by food name")):
-            text_entry(db_path)
-        usual_meals_ui(db_path)
-    if profile and pending:
-        day_strip(today, plan, eaten, meal_count, partial_count, legacy_count)
-    elif not profile and st.button(tr("建立个人计划", "Create a personal plan"), width="stretch"):
+            with st.expander(tr("今天的目标", "Today's targets")):
+                day_strip(today, plan, eaten, 0)
+    if not profile and st.button(tr("建立个人计划", "Create a personal plan"), width="stretch"):
         st.session_state.edit_profile = True
         st.rerun()
+
+
+def pending_review(pending, db_path, public_demo):
+    count = len(pending)
+    st.subheader(tr("待确认的餐", "Meal to confirm") if count == 1
+                 else tr(f"{count} 餐待确认", f"{count} meals to confirm"))
+    docs = {d["id"]: d for d in pending}
+    chosen = st.session_state.get("active_draft")
+    if chosen not in docs:
+        chosen = pending[0]["id"]
+    if count > 1:
+        chosen = st.selectbox(tr("选择待确认的餐", "Choose a draft"), list(docs), index=list(docs).index(chosen),
+                              format_func=lambda i: draft_label(docs[i]))
+    else:
+        st.caption(draft_label(docs[chosen], time_only=True))
+    review_pending(docs[chosen], db_path, public_demo)
+
+
+def _choose_section(control, sections):
+    chosen = st.session_state.get(control)
+    if chosen in sections:
+        st.session_state.section = chosen
+
+
+def navigation(has_plan):
+    sections = ["记餐", "日记"] + (["训练安排"] if has_plan else [])
+    current = st.session_state.get("section", "记餐")
+    if current not in sections:
+        current = "记餐"
+    st.session_state.section = current
+    titles = {"记餐": tr("记餐", "Log"), "日记": tr("日记", "Diary"), "训练安排": tr("训练安排", "Training")}
+    # The browser serializes translated labels. Remount with an explicit
+    # default when the route or language changes, including shortcut jumps.
+    control = f"diary_nav_{st.session_state.ui_lang}_{current}"
+    st.segmented_control(tr("打开", "Navigate"), sections, format_func=titles.__getitem__,
+                         default=current, required=True, key=control, label_visibility="collapsed",
+                         on_change=_choose_section, args=(control, sections))
+    return current
 
 
 def main(*, public_demo=False):
     st.set_page_config(page_title="Meal Diary · 食阁记餐", page_icon="🍚", layout="centered")
     apply_mobile_style()
-    language_switch()
-    st.title(tr("食阁记餐", "Meal Diary"))
+    with st.container(key="meal_header", horizontal=True, horizontal_alignment="distribute", vertical_alignment="center"):
+        title = st.empty()
+        language_switch()
+        title.title(tr("食阁记餐", "Meal Diary"))
     db_path = cloud_diary() if public_demo else None
     today = datetime.now(SG_TIME).date()
     profile = get_profile(db_path=db_path)
@@ -229,12 +274,7 @@ def main(*, public_demo=False):
     eaten = total_nutrients([r["totals"] for r in records])
     days = calendar_for_view(profile, today, db_path) if profile else ()
     plan = day_plan(profile, today, days) if profile else None
-    sections = ["记餐", "日记"] + (["训练安排"] if profile else [])
-    if st.session_state.get("section") not in sections:
-        st.session_state.section = "记餐"
-    titles = {key: tr(key, en) for key, en in [("记餐", "Log"), ("日记", "Diary"), ("训练安排", "Training")]}
-    section = st.segmented_control(tr("打开", "Navigate"), sections, key="section", format_func=titles.__getitem__,
-                                   label_visibility="collapsed") or "记餐"
+    section = navigation(bool(profile))
     if st.session_state.get("device_storage_blocked"):
         st.info(tr("此浏览器限制了设备存储。请允许网站数据后再拍照，以便重新打开时找回草稿。", "Allow website data in this browser to recover meal drafts after reopening."))
     elif st.session_state.get("draft_backup_limited"):
@@ -242,7 +282,7 @@ def main(*, public_demo=False):
     statuses = [coverage_status(record) for record in records]
     partial_count, legacy_count = statuses.count("partial"), statuses.count("legacy_review")
     if section == "记餐":
-        home(db_path, public_demo, today, profile, plan, eaten, len(records), partial_count, legacy_count)
+        home(db_path, public_demo, today, profile, plan, eaten, records, partial_count, legacy_count)
     elif section == "训练安排":
         training_plan(profile, today, days, db_path)
         with st.expander(tr("今日目标明细", "Today's targets")):

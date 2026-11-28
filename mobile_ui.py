@@ -10,13 +10,12 @@ from planning import span
 
 
 def apply_mobile_style():
-    # Tint the existing Streamlit canvas so its light/dark text stays readable.
     st.html("""
     <style>
-      .stApp {
+      :root {
         --meal-green: #216650;
         --meal-selected: #285e4b;
-        background-image: linear-gradient(135deg, #b99b5920, #73a78b0b 38%, transparent 72%);
+        --meal-focus: #5a9874;
       }
       .stMainBlockContainer {
         max-width: 46rem;
@@ -30,6 +29,16 @@ def apply_mobile_style():
       .stMain h1 {font-size: clamp(1.75rem, 5vw, 2.3rem);}
       .stMain h2 {font-size: 1.42rem;}
       .stMain h3 {font-size: 1.18rem;}
+      .st-key-meal_header {flex-wrap: nowrap; gap: .5rem;}
+      .st-key-meal_header .st-key-language_cache {display: none;}
+      .st-key-meal_header h1 {margin: 0; padding: 0; white-space: nowrap;}
+      .st-key-meal_header .st-key-ui_language_control {width: max-content; flex: none;}
+      .st-key-meal_header .st-key-ui_language_control button {font-size: .84rem;}
+      [class*="st-key-food_hits_"] .stButton button {
+        justify-content: flex-start; text-align: start; white-space: normal; height: auto;
+        min-height: 44px; padding-block: .55rem;
+      }
+      [class*="st-key-food_hits_"] .stButton button p {text-align: start; overflow-wrap: anywhere;}
       .stMain button[kind="primary"]:not(:disabled),
       .stMain [data-testid="stBaseButton-primaryFormSubmit"]:not(:disabled) {
         border-color: var(--meal-green);
@@ -62,19 +71,35 @@ def apply_mobile_style():
         color: inherit;
       }
       .stMain button:focus-visible, .stMain summary:focus-visible {
-        outline: 3px solid #64a48a;
+        outline: 3px solid var(--meal-focus);
         outline-offset: 2px;
       }
-      .st-key-day_strip, .st-key-saved_receipt {
-        border-inline-start: 3px solid #538971;
-        border-radius: 0 .65rem .65rem 0;
-        background: rgba(100, 151, 121, .11);
-        padding: .75rem .95rem 1.05rem;
-        gap: .45rem;
+      .st-key-day_strip {
+        border: 1px solid rgba(106, 143, 113, .38);
+        border-radius: .85rem;
+        background: rgba(113, 156, 110, .10);
+        padding: .72rem .85rem;
+        gap: .35rem;
       }
-      .st-key-day_strip p, .st-key-saved_receipt p {margin: 0;}
+      .st-key-day_strip :is([data-testid="stMarkdownContainer"], [data-testid="stCaptionContainer"]) {
+        margin-bottom: 0;
+      }
+      .st-key-day_strip p {margin: 0; line-height: 1.4;}
+      :is(.st-key-day_strip, .st-key-home_before, .st-key-home_pending) [data-testid="stCaptionContainer"] {
+        color: inherit; opacity: .84;
+      }
+      .st-key-home_after [data-testid="stText"] {
+        font-family: inherit; white-space: pre-wrap; overflow-wrap: anywhere;
+      }
+      :is(.st-key-day_strip, .st-key-mituan_panel) button[kind="tertiary"] {
+        min-height: 44px; padding: .4rem .75rem;
+        border: 1px solid rgba(106, 143, 113, .6);
+        border-radius: .65rem; background: rgba(113, 156, 110, .09);
+        color: inherit; font-weight: 550;
+      }
       @media (max-width: 640px) {
-        .stMainBlockContainer {padding: 3.5rem 1rem max(6rem, calc(env(safe-area-inset-bottom) + 5rem));}
+        .stMainBlockContainer {padding: 4.2rem 1rem max(6rem, calc(env(safe-area-inset-bottom) + 5rem));}
+        .st-key-meal_header h1 {font-size: clamp(1.45rem, 6vw, 1.85rem);}
         .stMain :is(.stButton, .stFormSubmitButton, .stButtonGroup) button {min-height: 44px;}
         [class*="-eaten-"] [role="radiogroup"] {
           display: grid;
@@ -114,8 +139,6 @@ def _open_training():
 
 
 def day_strip(today, plan, eaten, meal_count, partial_count=0, legacy_count=0):
-    from coach_ui import open_dinner
-
     low, high = plan.kcal
     kcal = eaten["kcal"]
     protein = eaten["protein_g"]
@@ -142,30 +165,23 @@ def day_strip(today, plan, eaten, meal_count, partial_count=0, legacy_count=0):
         st.markdown(tr(f"**{today.month} 月 {today.day} 日 · {plan.label}**", f"**{today:%d %b} · {'Training day' if plan.training else 'Rest day'}**"))
         st.write(summary)
         st.caption(detail)
-        with st.container(horizontal=True, gap="small"):
-            if meal_count:
-                st.button(tr("看晚餐建议", "Plan dinner"), type="tertiary", on_click=open_dinner, key="home_dinner")
-            st.button(tr("调整训练安排", "Adjust training"), type="tertiary", on_click=_open_training, key="home_training")
+        st.button(tr("调整训练安排", "Adjust training"), on_click=_open_training, key="home_training")
 
 
-def saved_receipt(record):
-    with st.container(key="saved_receipt"):
-        status = coverage_status(record) if record else "complete"
-        title, label = {
-            "partial": (tr("已将选中的食物记入日记", "Selected foods added to diary"), tr("已选小计", "Selected subtotal")),
-            "legacy_review": (tr("这餐的旧记录待核对", "Older entry to review"), tr("已记食物小计", "Logged subtotal")),
-            "complete": (tr("这餐已记入日记", "Meal added to diary"), tr("这餐", "Meal")),
-        }[status]
-        st.markdown(f"**{title}**")
-        if record is None:
-            return
-        if record["input"].get("method") == "label":
-            name = (record["input"].get("label") or {}).get("product_name") or tr("包装食品", "Packaged food")
-            st.text(name)
-        totals = record["totals"]
-        st.write(tr(f"{label}约 {totals['kcal']:.0f} kcal · 蛋白质 {totals['protein_g']:.1f} g", f"{label} · About {totals['kcal']:.0f} kcal · Protein {totals['protein_g']:.1f} g"))
-        if status == "partial" and (names := record["input"].get("unmatched_foods")):
-            st.caption(tr("未计入：", "Not counted: ") + tr("、".join(names), ", ".join(record["input"].get("unmatched_foods_en") or names)))
+def saved_receipt(record, *, just_saved):
+    status = coverage_status(record)
+    if status == "complete":
+        title = tr("这餐已记入日记", "Meal added to diary") if just_saved else tr("最近一餐", "Last meal")
+    else:
+        title = tr("这餐已记录的小计", "Logged meal subtotal")
+    st.markdown(f"**{title}**")
+    names = tr("、", ", ").join(_record_name(item) for item in record.get("items", [])[:2])
+    totals = record["totals"]
+    values = tr(f"约 {totals['kcal']:.0f} kcal · 蛋白质 {totals['protein_g']:.1f} g",
+                f"About {totals['kcal']:.0f} kcal · {totals['protein_g']:.1f} g protein")
+    st.text(" · ".join(filter(None, (names, values))))
+    if status == "partial" and (missing := record["input"].get("unmatched_foods")):
+        st.caption(tr("未计入：", "Not counted: ") + tr("、".join(missing), ", ".join(record["input"].get("unmatched_foods_en") or missing)))
 
 
 def _record_name(item):

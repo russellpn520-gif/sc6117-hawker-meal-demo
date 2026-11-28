@@ -24,10 +24,13 @@ class ReadWorkout(BaseModel):
 
 
 class PlanDinner(BaseModel):
-    """Find an affordable dinner or its grocery list using the user's explicitly saved food restrictions."""
+    """Find a dinner to order or cook, or a grocery list, using saved preferences."""
     groceries: bool
     budget_sgd: float | None = Field(description="An explicit spending ceiling for one dinner in Singapore dollars, or null.")
     new_food_restrictions: bool = Field(description="True if the user specifies or changes any allergy, excluded item, dietary constraint or special diet in this request.")
+    mode: Literal["out", "home"] | None = Field(
+        default=None, json_schema_extra=lambda schema: schema.pop("default", None),
+        description="Only when explicitly requested: out for eating out, home for cooking at home, otherwise null.")
 
 
 class PreviewMove(BaseModel):
@@ -186,8 +189,9 @@ def confirm_move(origin, destination, *, today, db_path=None, lang="zh", expecte
     return False, ("This preview is no longer valid. Check the current schedule." if en else "这份预览已失效，请重新查看日程。")
 
 
-def ask_coach(question, *, today, db_path=None, lang="zh", api_key="", quick=None, history=(), meal_context=None):
-    from nutrition_coach import dinner_result, get_preferences
+def ask_coach(question, *, today, db_path=None, lang="zh", api_key="", quick=None, history=(), meal_context=None,
+              dinner_budget_sgd=None):
+    from nutrition_coach import dinner_result, get_dinner_mode
 
     en = lang == "en"
     result = {"text": "", "move": None, "meal_context": None, "show_nutrition": False,
@@ -195,7 +199,7 @@ def ask_coach(question, *, today, db_path=None, lang="zh", api_key="", quick=Non
     shortcuts = {"today": ReadDiary(period="today"), "week": ReadDiary(period="week"),
                  "training": ReadWorkout(day=today.isoformat()),
                  "move": PreviewMove(origin=today.isoformat(), destination=(today + timedelta(days=1)).isoformat()),
-                 "dinner": PlanDinner(groceries=False, budget_sgd=None, new_food_restrictions=False),
+                 "dinner": PlanDinner(groceries=False, budget_sgd=dinner_budget_sgd, new_food_restrictions=False),
                  "shopping": PlanDinner(groceries=True, budget_sgd=None, new_food_restrictions=False)}
     if quick in shortcuts:
         calls = [shortcuts[quick]]
@@ -228,7 +232,7 @@ def ask_coach(question, *, today, db_path=None, lang="zh", api_key="", quick=Non
     if len(dinners) > 1:
         caps = [c.budget_sgd for c in dinners if c.budget_sgd is not None]
         dinner = PlanDinner(groceries=any(c.groceries for c in dinners), budget_sgd=min(caps, default=None),
-                            new_food_restrictions=False)
+                            new_food_restrictions=False, mode=next((c.mode for c in dinners if c.mode), None))
         calls = [c for c in calls if not isinstance(c, PlanDinner)] + [dinner]
     if len({(c.origin, c.destination) for c in calls if isinstance(c, PreviewMove)}) > 1:
         calls = [c for c in calls if not isinstance(c, PreviewMove)] + [PreviewMove(origin="", destination="")]
@@ -267,26 +271,40 @@ def ask_coach(question, *, today, db_path=None, lang="zh", api_key="", quick=Non
                 text = training_reply(profile, day, db_path=db_path, lang=lang)
             result["show_training_setup"] |= not (profile and profile.training)
         elif isinstance(call, PlanDinner):
+            mode = "home" if call.groceries else call.mode or get_dinner_mode(db_path)
+            result["dinner_mode"] = mode
+            result["dinner_budget_sgd"] = call.budget_sgd
+            if mode is None:
+                messages.append("Where are you having dinner?" if en else "今晚准备在哪儿吃？")
+                continue
             rows, totals, partial, plan = _today_values(profile, today, db_path)
             eligible = bool(rows and plan and not partial)
             prior = result["meal_context"] or meal_context
             use_prior = call.groceries and isinstance(prior, dict) and prior.get("day") == today.isoformat()
             cap = call.budget_sgd
-            if use_prior:
+            if use_prior and prior.get("budget_sgd") is not None:
                 cap = prior["budget_sgd"] if cap is None else min(cap, prior["budget_sgd"])
             text, context = dinner_result(
-                db_path, lang=lang, shopping=call.groceries, budget_sgd=cap,
+                db_path, lang=lang, mode=mode, shopping=call.groceries, budget_sgd=cap,
                 recipe_name=prior["recipe_name"] if use_prior else None,
                 remaining_kcal=max(0, plan.kcal[0] - totals["kcal"]) if eligible else None,
                 remaining_protein=max(0, plan.protein_g - totals["protein_g"]) if eligible else None,
             )
-            result["meal_context"] = dict(context, day=today.isoformat()) if context else None
+            if context and "reference_portions" in context:
+                result["dinner_references"] = context["reference_portions"]
+            else:
+                result["meal_context"] = dict(context, day=today.isoformat()) if context else None
             if plan:
                 label = ("Training day" if plan.training else "Rest day") if en else plan.label
-                text += f"\n\n{label} · {span(plan.kcal)} kcal · {plan.protein_g} g " + ("protein target" if en else "蛋白质目标")
+                if eligible:
+                    kcal_left = span(tuple(max(0, target - totals["kcal"]) for target in plan.kcal))
+                    protein_left = max(0, plan.protein_g - totals["protein_g"])
+                    text += (f"\n\n{label} · Your log leaves about {kcal_left} kcal and {protein_left:.0f} g protein before dinner." if en
+                             else f"\n\n今天是{label}，按已确认餐食，晚饭前余量约 {kcal_left} kcal、蛋白质 {protein_left:.0f} g。")
+                else:
+                    text += f"\n\n{label} · {span(plan.kcal)} kcal · {plan.protein_g} g " + ("protein target" if en else "蛋白质目标")
             if partial:
                 text += (" · Some meals are partial; dinner is based on your preferences." if en else " · 日记有部分记录，晚餐按饮食偏好筛选。")
-            result["show_nutrition"] |= get_preferences(db_path) is None
         elif isinstance(call, NextStep) and call.reason == "food_preferences":
             result["show_nutrition"] = True
             text = ("Review and save all food exclusions in Meal preferences before requesting a menu with these constraints." if en

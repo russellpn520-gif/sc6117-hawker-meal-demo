@@ -1,0 +1,13 @@
+[theme.light]
+primaryColor = "#245F47"
+linkColor = "#285F49"
+backgroundColor = "#FBF9F3"
+secondaryBackgroundColor = "#F0F2EA"
+textColor = "#22382C"
+
+[theme.dark]
+primaryColor = "#94D5AA"
+linkColor = "#A4D6B5"
+backgroundColor = "#19251F"
+secondaryBackgroundColor = "#25332A"
+textColor = "#F3F1E4"

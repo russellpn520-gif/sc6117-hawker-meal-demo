@@ -25,20 +25,20 @@ _ACTIONS = {
 def _close():
     state = st.session_state.get("mituan_state")
     if state:
-        state.update(open=False, pending=None, preferences=False)
+        state.update(open=False, pending=None, preferences=False, dinner_only=False)
 
 
 def open_dinner():
     state = st.session_state.get("mituan_state")
     if state:
-        state.update(open=True, pending=None, dinner_requested=True)
+        state.update(open=True, pending=None, dinner_requested=True, dinner_only=True)
 
 
 def _history(turns):
     return [{"role": "user", "content": turn["question"]} for turn in turns[-3:]]
 
 
-def _ask(state, question, today, db_path, *, quick=None, api_key=""):
+def _ask(state, question, today, db_path, *, quick=None, api_key="", replace=False, dinner_budget_sgd=None):
     from coach import ask_coach
 
     # Consume the submitted question once, even if the dialog is rerendered.
@@ -49,8 +49,10 @@ def _ask(state, question, today, db_path, *, quick=None, api_key=""):
     previous_meal = turns[-1]["reply"].get("meal_context") if turns and quick in (None, "shopping") else None
     with st.spinner(tr("米团在查看你的安排…", "Mituan is checking your plan…")):
         reply = ask_coach(question, today=today, db_path=db_path, lang=lang, api_key=api_key,
-                          quick=quick, history=_history(turns), meal_context=previous_meal)
-    turns.append({"question": tr(*_ACTIONS[quick]) if quick else question, "reply": reply, "quick": quick})
+                          quick=quick, history=_history(turns), meal_context=previous_meal, dinner_budget_sgd=dinner_budget_sgd)
+    if replace and turns:
+        turns.pop()
+    turns.append({"question": tr(*_ACTIONS[quick]) if quick else question, "reply": reply, "quick": quick, "lang": lang})
     del turns[:-6]
 
 
@@ -59,8 +61,30 @@ def _show_reply(state, today, db_path):
         return
     turn = state["turns"][-1]
     reply = turn["reply"]
-    st.text(turn["question"])
+    if "dinner_mode" in reply:
+        from nutrition_coach import save_dinner_mode
+
+        modes = {"out": tr("在外吃", "Eat out"), "home": tr("自己做", "Cook at home")}
+        lang = st.session_state.get("ui_lang", "zh")
+        selected = reply["dinner_mode"]
+        if selected is None:
+            st.markdown("**" + tr("今晚准备在哪儿吃？", "Where are you having dinner?") + "**")
+        choice = st.segmented_control(tr("用餐方式", "Dinner setting"), list(modes),
+                                      format_func=modes.__getitem__, default=selected, required=bool(selected),
+                                      label_visibility="collapsed", key=f"mituan_dinner_mode_{lang}_{selected}")
+        if choice in modes and choice != selected:
+            save_dinner_mode(db_path, choice)
+            _ask(state, "", today, db_path, quick="dinner", replace=True, dinner_budget_sgd=reply.get("dinner_budget_sgd"))
+            st.rerun()
+        if selected is None and turn["quick"] == "dinner":
+            return
+    else:
+        st.text(turn["question"])
     st.markdown(reply["text"])
+    if sources := reply.get("dinner_references"):
+        with st.expander(tr("查看参考份量与来源", "Reference portions and sources")):
+            for source in sources:
+                st.markdown(f"[{source['name']} · {source['grams']} g]({source['source_url']})")
     tools_used = reply.get("tool_names", [])
     followups = []
     if turn["quick"] == "today" or ("ReadDiary" in tools_used and turn["quick"] != "week"):
@@ -70,7 +94,7 @@ def _show_reply(state, today, db_path):
     if isinstance(reply.get("meal_context"), dict) and turn["quick"] != "shopping":
         followups.append("shopping")
     for action in followups:
-        if st.button(tr(*_ACTIONS[action]), type="tertiary", key=f"mituan_follow_{action}"):
+        if st.button(tr(*_ACTIONS[action]), key=f"mituan_follow_{action}"):
             _ask(state, "", today, db_path, quick=action)
             st.rerun()
     if move := reply.get("move"):
@@ -136,7 +160,15 @@ def _panel(today, db_path, public_demo):
     state["food_profile"] = preferences
     if state.pop("dinner_requested", False):
         _ask(state, "", today, db_path, quick="dinner")
+    elif state["turns"]:
+        last = state["turns"][-1]
+        if last.get("quick") in ("dinner", "shopping") and last.get("lang") != st.session_state.get("ui_lang", "zh"):
+            _ask(state, "", today, db_path, quick=last["quick"], replace=True,
+                 dinner_budget_sgd=last["reply"].get("dinner_budget_sgd"))
     with st.container(key="mituan_panel"):
+        if state.get("dinner_only"):
+            _show_reply(state, today, db_path)
+            return
         greeting = tr("想看看今天的训练，还是决定晚餐吃什么？",
                       "Check your workout or pick something for dinner.")
         st.html(f'<div class="mituan-intro">{_FACE}<p>{greeting}</p></div>')
@@ -189,5 +221,7 @@ def coach_entry(today, db_path, public_demo):
         st.html(f"<span{cloud_mark}>{_FACE}</span>")
         if st.button(tr("问米团", "Ask Mituan"), key="mituan_launcher"):
             state["open"] = True
+            state["dinner_only"] = False
     if state["open"]:
-        st.dialog(tr("米团顾问", "Mituan, your coach"), on_dismiss=_close)(_panel)(today, db_path, public_demo)
+        title = tr("今晚的晚餐", "Dinner tonight") if state.get("dinner_only") else tr("米团顾问", "Mituan, your coach")
+        st.dialog(title, on_dismiss=_close)(_panel)(today, db_path, public_demo)

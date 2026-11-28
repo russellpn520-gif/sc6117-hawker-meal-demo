@@ -28,7 +28,9 @@ def tr(zh, en):
 
 
 def _choose_language():
-    lang = st.session_state.ui_language_control
+    lang = st.session_state.get("ui_language_control")
+    if lang not in LANGUAGES:
+        return
     st.session_state.ui_lang = lang
     st.query_params["lang"] = lang
 
@@ -40,10 +42,12 @@ def language_switch():
                         on_language_change=lambda: None).language
     lang = explicit or (saved if saved in LANGUAGES else st.session_state.get("ui_lang", "zh"))
     st.session_state.ui_lang = lang
-    if st.session_state.get("ui_language_control") != lang:
+    default = lang
+    if "ui_language_control" in st.session_state and st.session_state.ui_language_control != lang:
         st.session_state.ui_language_control = lang
+        default = None
     st.segmented_control("Language / 语言", list(LANGUAGES), format_func=LANGUAGES.get, required=True,
-                         key="ui_language_control", on_change=_choose_language, label_visibility="collapsed")
+                         default=default, key="ui_language_control", on_change=_choose_language, label_visibility="collapsed")
 
 
 def food_name(food):

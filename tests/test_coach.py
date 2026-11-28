@@ -10,7 +10,7 @@ from langchain_openai import ChatOpenAI
 
 from coach import NextStep, PlanDinner, PreviewMove, ReadDiary, _route, ask_coach, confirm_move
 from meals import SG_TIME, create_pending, load_foods, make_draft, planned_days, portion_items, save_meal, save_profile
-from nutrition_coach import Preferences, save_preferences
+from nutrition_coach import Preferences, save_dinner_mode, save_preferences
 from planning import Profile
 
 
@@ -25,6 +25,7 @@ class CoachTests(unittest.TestCase):
                                start=self.today - timedelta(days=7))
         save_profile(self.profile, db_path=self.db)
         save_preferences(self.db, Preferences(700, "any", ()))
+        save_dinner_mode(self.db, "home")
 
     def ask(self, text="", *, lang="en", **kwargs):
         return ask_coach(text, today=self.today, db_path=self.db, lang=lang, **kwargs)
@@ -182,5 +183,9 @@ class CoachTests(unittest.TestCase):
         self.assertEqual(payload["tool_choice"], "required")
         self.assertEqual(ctor.call_args.kwargs["max_retries"], 0)
         self.assertTrue(all(t["strict"] for t in payload["tools"]))
+        dinner_schema = next(t["parameters"] for t in payload["tools"] if t["name"] == "PlanDinner")
+        self.assertEqual(set(dinner_schema["required"]), set(dinner_schema["properties"]))
+        self.assertNotIn("default", dinner_schema["properties"]["mode"])
+        self.assertIn({"type": "null"}, dinner_schema["properties"]["mode"]["anyOf"])
         self.assertEqual({t["name"] for t in payload["tools"]}, {"ReadDiary", "ReadWorkout", "PlanDinner", "PreviewMove", "NextStep"})
         self.assertNotIn("Private diary entries", json.dumps(payload["input"]))

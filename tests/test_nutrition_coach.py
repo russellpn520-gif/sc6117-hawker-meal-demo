@@ -1,5 +1,6 @@
 import dataclasses
 import itertools
+from contextlib import closing
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -83,7 +84,8 @@ class DinnerTests(unittest.TestCase):
         with TemporaryDirectory() as folder:
             path = Path(folder) / "new.db"
             self.assertIsNone(nc.get_preferences(path))
-            self.assertIn("Set your", nc.dinner_reply(path, lang="en"))
+            self.assertIn("Allergies not provided", nc.dinner_reply(path, lang="en"))
+            self.assertIsNone(nc.get_preferences(path))
             prefs = nc.Preferences(150, "vegan", ("egg",), other_restriction="")
             nc.save_preferences(path, prefs)
             self.assertEqual(nc.get_preferences(path), prefs)
@@ -115,8 +117,8 @@ st.markdown(dinner_reply(st.session_state.db, lang=st.session_state.ui_lang, sho
             app.session_state["ui_lang"] = "en"
             app.run()
             app.button[0].click().run()
-            self.assertTrue(app.warning)
-            self.assertIsNone(nc.get_preferences(path))
+            self.assertFalse(app.warning)
+            self.assertEqual(nc.get_preferences(path), nc.Preferences(None, "any", None))
             app.number_input(key="demo_prefs-budget").set_value(2.50)
             app.selectbox(key="demo_prefs-diet").set_value("vegan")
             app.multiselect(key="demo_prefs-allergies").set_value(["soy"])
@@ -135,3 +137,36 @@ st.markdown(dinner_reply(st.session_state.db, lang=st.session_state.ui_lang, sho
             other.button[0].click().run()
             self.assertFalse(other.exception)
             self.assertTrue(any("无法核实" in item.value and "S$" not in item.value for item in other.markdown))
+
+    def test_eating_out_portions_sources_and_unreported_vs_explicit_allergies(self):
+        import json
+        from meals import clear_diary
+
+        with TemporaryDirectory() as folder:
+            path = Path(folder) / "dinner.db"
+            outside, evidence = nc.dinner_result(path, lang="en", mode="out")
+            self.assertNotIn("recipe_name", evidence)
+            self.assertIn("At the counter", outside)
+            self.assertIn("380 kcal", outside)  # HPB: 248 + 75 + 57
+            self.assertEqual([p["grams"] for p in evidence["reference_portions"]], [180, 90, 100])
+            self.assertTrue(all(p["source_url"].startswith("https://") for p in evidence["reference_portions"]))
+            self.assertIn("Allergies not provided", outside)
+            self.assertNotIn("S$", outside)
+            self.assertIsNone(nc.get_dinner_mode(path))
+            self.assertIsNone(nc.get_preferences(path))
+            nc.save_dinner_mode(path, "out")
+            self.assertEqual(nc.get_dinner_mode(path), "out")
+            with closing(nc._prefs_db(path)) as db, db:
+                db.execute("INSERT INTO nutrition_preferences VALUES(1,?)",
+                           (json.dumps(dict(budget_cents=450, diet="vegan", allergies=[], avoid=[], other_restriction="")),))
+            self.assertEqual(nc.get_preferences(path).allergies, ())
+            nc.save_preferences(path, nc.Preferences(400, "vegan", ("soy",)))
+            filtered = nc.dinner_reply(path, lang="en", mode="out")
+            self.assertIn("Chickpea", filtered)
+            self.assertIn("Check the menu price", filtered)
+            self.assertIn("Soy", filtered)
+            self.assertNotIn("Allergies not provided", filtered)
+            self.assertEqual(nc.get_dinner_mode(path), "out")
+            clear_diary(db_path=path)
+            self.assertIsNone(nc.get_dinner_mode(path))
+            self.assertIsNone(nc.get_preferences(path))

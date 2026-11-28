@@ -106,6 +106,6 @@ class LabelTests(unittest.TestCase):
                 record, = list_meals(datetime.now(SG_TIME).date(), db_path=path)
                 self.assertAlmostEqual(record["totals"]["kcal"], 62.5)
                 self.assertIsNone(get_pending(draft["id"], db_path=path))
-                next(b for b in app.get("button_group") if b.key=="section").set_value("日记").run()
+                next(b for b in app.get("button_group") if b.key.startswith("diary_nav_")).set_value("日记").run()
                 self.assertFalse(app.exception)
                 self.assertTrue(any("125 ml" in t.value.lower() for t in app.markdown))

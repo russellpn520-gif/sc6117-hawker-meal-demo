@@ -16,6 +16,16 @@ def review_app(suggested, details=None, **extra):
 
 
 class MealReviewTests(unittest.TestCase):
+    def test_short_manual_search_surfaces_familiar_dishes_and_preserves_precise_queries(self):
+        from meal_review import _manual_matches
+        from meals import load_foods
+
+        foods = load_foods()
+        for query, familiar in (("鱼", "steamed-fish"), ("蛋", "boiled-egg")):
+            self.assertIn(familiar, _manual_matches(foods, query)[:3])
+        for query in ("清蒸鱼", "steamed fish"):
+            self.assertEqual(_manual_matches(foods, query), foods.search(query))
+
     def test_one_tap_means_all_served_food(self):
         app = review_app({"fdc-2708555": 450, "fdc-2708202": 50})
         self.assertFalse(app.exception)
@@ -101,7 +111,10 @@ class MealReviewTests(unittest.TestCase):
     def test_deselecting_resolved_food_restores_guard_and_manual_search_works(self):
         app = review_app({"fdc-2708202": 6}, {"unmatched": ["陌生主食"]})
         app.text_input(key="meal-bowl-legacy-0-lookup").set_value("白饭").run()
-        app.button(key="meal-bowl-legacy-0-use").click().run()
+        hit = app.button(key="meal-bowl-legacy-0-hit-white-rice")
+        self.assertIn("白饭", hit.label)
+        self.assertIn("HPB", hit.label)
+        hit.click().run()
         self.assertFalse(app.exception)
         self.assertFalse(app.warning)
         app.multiselect(key="meal-bowl-foods").unselect("white-rice").run()

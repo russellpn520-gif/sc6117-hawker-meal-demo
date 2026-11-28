@@ -42,7 +42,7 @@ class MainDishReviewTests(unittest.TestCase):
         self.assertTrue(any("main dish is incomplete" in w.value for w in app.warning))
         field = next(t for t in app.text_input if t.label == "Search for a whole dish")
         field.set_value("ban mian").run()
-        next(b for b in app.button if b.label == "Use this dish").click().run()
+        next(b for b in app.button if b.key and b.key.endswith("-hit-ban-mian")).click().run()
         self.assertFalse(app.exception)
         self.assertFalse(app.warning)
         next(b for b in app.button if b.label == "Ate it all · Log meal").click().run()
