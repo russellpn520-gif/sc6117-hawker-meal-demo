@@ -351,8 +351,12 @@ def main(*, public_demo=False):
     coach_entry(today, db_path, public_demo)
 
 
-if __name__ == "__main__":
+def run_diary(*, public_demo=False):
     try:
-        main()
+        main(public_demo=public_demo)
     except sqlite3.Error:
         st.error(tr("暂时无法读写记餐记录，请稍后重试。", "Could not access the diary. Please try again shortly."))
+
+
+if __name__ == "__main__":
+    run_diary()
