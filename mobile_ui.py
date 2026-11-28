@@ -1,8 +1,10 @@
 """Compact, mobile-first presentation for the meal diary."""
 
+from datetime import datetime
+
 import streamlit as st
 
-from meals import total_nutrients
+from meals import SG_TIME, total_nutrients
 from planning import span
 
 
@@ -111,8 +113,10 @@ def meal_history(records, day=None):
         title = "、".join(item["name"] for item in items[:2])
         if len(items) > 2:
             title += f" 等 {len(items)} 项"
-        with st.expander(f"{record['at']:%H:%M}　{title}　·　约 {record['totals']['kcal']:.0f} kcal"):
-            original = record["input"]
+        original = record["input"]
+        stamp = (datetime.fromisoformat(original["captured_at"]).astimezone(SG_TIME)
+                 if original.get("captured_at") else record["at"])
+        with st.expander(f"{stamp:%H:%M}　{title}　·　约 {record['totals']['kcal']:.0f} kcal"):
             weight = sum(item["confirmed_g"] for item in items)
             served = original.get("served_grams")
             if served:

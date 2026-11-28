@@ -37,6 +37,15 @@ device_storage = st.components.v2.component(
         marker.dataset.sent = value;
         setStateValue("token", value);
       }
+      const onRotation = event => {
+        if (event.key === key && /^[0-9a-f]{32}$/.test(event.newValue || "")
+            && marker.dataset.sent !== event.newValue) {
+          marker.dataset.sent = event.newValue;
+          setStateValue("token", event.newValue);
+        }
+      };
+      window.addEventListener("storage", onRotation);
+      return () => window.removeEventListener("storage", onRotation);
     }
     """,
 )
@@ -56,12 +65,20 @@ pending_storage = st.components.v2.component(
       const reply = {op, token, generation, revision, ok: true};
       try {
         if (localStorage.getItem("sc6117.meals.diary.v1") !== token) return;
+        let previous = {};
+        try { previous = JSON.parse(localStorage.getItem(key) || "{}") || {}; }
+        catch { /* A fresh valid snapshot can replace damaged browser data. */ }
         if (op === "restore") {
-          reply.rows = JSON.parse(localStorage.getItem(key) || "{}").rows || [];
-        } else {
-          const previous = JSON.parse(localStorage.getItem(key) || "{}");
-          if (previous.generation !== generation || !(previous.revision >= revision))
+          reply.rows = Array.isArray(previous.rows) ? previous.rows : [];
+          // Claim the new disk generation before accepting another tab's writes.
+          // Keep the old snapshot intact until the server acknowledges recovery.
+          if (previous.generation !== generation)
+            localStorage.setItem(key, JSON.stringify({generation, revision: -1, rows: reply.rows}));
+        } else if (!previous.generation || previous.generation === generation) {
+          if (!(previous.revision >= revision) || !previous.generation)
             localStorage.setItem(key, JSON.stringify({generation, revision, rows: data.rows}));
+        } else {
+          reply.ok = false;
         }
       } catch {
         reply.ok = false;
@@ -110,11 +127,17 @@ def cloud_diary():
         st.stop()
     state.device_storage_blocked = token == "unavailable"
     if command["op"] != "read":
-        if token != "unavailable" and token != command.get("next", command.get("token")):
+        # Concurrent clears in two tabs converge on whichever new token was
+        # actually written. A tab must not wait for its losing proposal.
+        waiting = token == command["old"] if command["op"] == "forget" else token != command.get("token")
+        if token != "unavailable" and waiting:
             st.stop()
         state.pop("device_command", None)
     path = _diary_path(token)
     if path:
+        if state.get("diary_token") and state.diary_token != token:
+            for key in ("active_draft", "capture_ack", "receipt", "edit_profile"):
+                state.pop(key, None)
         state.diary_token = token
         _sync_pending(path, token)
         return path

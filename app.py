@@ -170,7 +170,8 @@ def review_pending(draft, db_path, public_demo):
 def draft_label(draft):
     stamp = datetime.fromisoformat(draft["captured_at"]).astimezone(SG_TIME)
     keys = draft["input"].get("suggested_grams", {})
-    names = [load_foods()[k].name for k in keys if k in load_foods()][:2]
+    foods = load_foods() if keys else {}
+    names = [foods[k].name for k in keys if k in foods][:2]
     return f"{stamp.month}/{stamp.day} {stamp:%H:%M}　" + ("、".join(names) if names else "餐食草稿")
 
 
