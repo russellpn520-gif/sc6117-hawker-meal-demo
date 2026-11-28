@@ -113,23 +113,39 @@ def _open_training():
     st.session_state.section = "训练安排"
 
 
-def day_strip(today, plan, eaten, partial_count=0, legacy_count=0):
-    """Keep today's training and remaining energy visible in two lines."""
+def day_strip(today, plan, eaten, meal_count, partial_count=0, legacy_count=0):
+    from coach_ui import open_dinner
+
     low, high = plan.kcal
     kcal = eaten["kcal"]
-    if note := coverage_note(partial_count, legacy_count):
-        summary = tr(f"今日已记约 {kcal:.0f} kcal，含 {note}", f"About {kcal:.0f} kcal logged today · {note}")
+    protein = eaten["protein_g"]
+    note = coverage_note(partial_count, legacy_count)
+    if not meal_count:
+        summary = tr(f"今日参考目标 {span(plan.kcal)} kcal", f"Today's energy target · {span(plan.kcal)} kcal")
+        detail = tr(f"蛋白质目标 {plan.protein_g} g", f"Protein target · {plan.protein_g} g")
+    elif note:
+        summary = tr(f"已记小计约 {kcal:.0f} kcal · 蛋白质 {protein:.1f} g",
+                     f"Logged subtotal · {kcal:.0f} kcal and {protein:.1f} g protein")
+        detail = note
     elif kcal < low:
         remaining = span((low - kcal, high - kcal))
-        summary = tr(f"今日剩余参考量约 {remaining} kcal", f"Estimated remaining today: {remaining} kcal")
+        summary = tr(f"今天还余约 {remaining} kcal", f"About {remaining} kcal left today")
     elif kcal <= high:
         summary = tr("今日已在热量参考范围内", "Within today's energy target")
     else:
         summary = tr(f"今日已记 {kcal:.0f} kcal，参考范围 {span(plan.kcal)} kcal", f"{kcal:.0f} kcal logged · Target {span(plan.kcal)} kcal")
+    if meal_count and not note:
+        left = plan.protein_g - protein
+        detail = (tr(f"蛋白质还差 {left:.1f} g", f"{left:.1f} g protein left") if left > 0
+                  else tr("蛋白质已达今日目标", "Protein target reached"))
     with st.container(key="day_strip"):
         st.markdown(tr(f"**{today.month} 月 {today.day} 日 · {plan.label}**", f"**{today:%d %b} · {'Training day' if plan.training else 'Rest day'}**"))
-        st.caption(tr(f"{summary} · 蛋白质 {eaten['protein_g']:.1f} / {plan.protein_g} g", f"{summary} · Protein {eaten['protein_g']:.1f} / {plan.protein_g} g"))
-        st.button(tr("调整训练安排", "Adjust training"), type="tertiary", on_click=_open_training, key="home_training")
+        st.write(summary)
+        st.caption(detail)
+        with st.container(horizontal=True, gap="small"):
+            if meal_count:
+                st.button(tr("看晚餐建议", "Plan dinner"), type="tertiary", on_click=open_dinner, key="home_dinner")
+            st.button(tr("调整训练安排", "Adjust training"), type="tertiary", on_click=_open_training, key="home_training")
 
 
 def saved_receipt(record):

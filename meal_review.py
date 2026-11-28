@@ -2,7 +2,7 @@ import streamlit as st
 
 from i18n import food_name, source_name, tr
 from recognition import reviewable_photo
-from meals import allocate_grams, load_foods, portion_items, total_nutrients
+from meals import allocate_grams, load_foods, portion_items, total_nutrients, update_pending_portion
 
 
 EATEN_SHARES = {4: ("全吃", "All"), 3: ("¾", "¾"), 2: ("一半", "Half"), 1: ("¼", "¼"), 0: ("没吃", "None")}
@@ -12,14 +12,25 @@ def _share_label(value):
     return tr(*EATEN_SHARES[value])
 
 
-def _review_choice(label, options, labels, default, key):
+def _persist_choice(widget_key, draft_id, method, db_path, variant, scope=None, food_id=None):
+    value = st.session_state[widget_key]
+    if food_id is None:
+        update_pending_portion(draft_id, method, value, db_path=db_path)
+    else:
+        update_pending_portion(draft_id, method, variant, food_id=food_id, scope=scope, quarters=value, db_path=db_path)
+
+
+def _review_choice(label, options, labels, default, key, *, save_args=None):
     # Streamlit serializes selection labels. Carry stable values across UI languages.
     widget_key = key + tr("", "-en")
     previous = key + "-value"
-    if widget_key not in st.session_state:
+    if save_args is not None and st.session_state.get(widget_key) != default:
+        st.session_state[widget_key] = default
+    elif widget_key not in st.session_state:
         st.session_state[widget_key] = st.session_state.get(previous, default)
     chosen = st.segmented_control(label, options, format_func=labels.__getitem__,
-                                  required=True, key=widget_key)
+                                  required=True, key=widget_key, on_change=_persist_choice if save_args else None,
+                                  args=(widget_key, *save_args) if save_args else ())
     st.session_state[previous] = chosen
     return chosen
 
@@ -268,7 +279,7 @@ def _correct_foods(panel, foods, original, view):
     return weights
 
 
-def review_meal(draft):
+def review_meal(draft, db_path=None):
     """Render an editable meal and return (draft, items) only on confirmation."""
     foods = load_foods()
     draft = reviewable_photo(draft)
@@ -281,13 +292,20 @@ def review_meal(draft):
     leftovers = st.expander(tr("有哪样没吃完？", "Any leftovers?"))
     action = st.container()
     view = prefix
-    if variants := draft.get("variants"):
+    saved = draft.get("portion_review") or {}
+    save_args = (draft["id"], original["method"], db_path) if "captured_at" in draft else None
+    mode = "default"
+    variants = draft.get("variants") or {}
+    if variants:
         modes = list(variants)
         legacy_partial = "main_dishes" not in original and any(
             v.get("missing_items") for v in variants.values())
         with (repair_area if legacy_partial else leftovers):
             labels = {m: tr(m, {"整道菜": "Whole dish", "按配料": "Ingredients", "推荐": "Suggested"}.get(m, m)) for m in modes}
-            mode = _review_choice(tr("要调整哪一部分？", "Adjust portions by"), modes, labels, modes[0], f"{prefix}-mode")
+            previous_mode = saved.get("variant")
+            mode = _review_choice(tr("要调整哪一部分？", "Adjust portions by"), modes, labels,
+                                  previous_mode if previous_mode in modes else modes[0], f"{prefix}-mode",
+                                  save_args=(*save_args, None) if save_args else None)
             st.caption(tr("只剩了碗里的米饭或配菜？点「按配料」单独调整。", "Choose Ingredients to adjust the rice or a topping separately."))
         original.update(variants[mode], portion_mode=mode)
         view = f"{prefix}-{mode}"
@@ -311,7 +329,16 @@ def review_meal(draft):
         for key in weights:
             label = tr(f"{food_name(foods[key])}吃了多少？", f"How much {food_name(foods[key])} did you eat?")
             labels = {value: _share_label(value) for value in EATEN_SHARES}
-            share = _review_choice(label, list(EATEN_SHARES), labels, 4, f"{prefix}-eaten-{key}")
+            # An identical side served in both views keeps the same choice. A food
+            # with a different weight in the other view has its own portion there.
+            weights_by_mode = [v["suggested_grams"].get(key) for v in variants.values()]
+            shared = weights_by_mode and None not in weights_by_mode and len(set(weights_by_mode)) == 1
+            scope = "shared" if shared else mode
+            stored = saved.get("shares", {}).get(scope, {}).get(key, 4)
+            scope_prefix = prefix if scope in ("shared", "default") else f"{prefix}-{scope}"
+            share = _review_choice(label, list(EATEN_SHARES), labels, stored if stored in EATEN_SHARES else 4,
+                                   f"{scope_prefix}-eaten-{key}",
+                                   save_args=(*save_args, mode, scope, key) if save_args else None)
             fractions[key] = share / 4
 
     consumed = {key: max(1, round(grams * fractions[key])) if fractions[key] else 0

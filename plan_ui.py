@@ -7,7 +7,8 @@ import streamlit as st
 from device_diary import forget_diary, remember_diary
 from i18n import tr
 from meals import clear_diary, move_workout, planned_days, save_profile
-from planning import ACTIVITIES, GOALS, SEXES, Profile, TrainingPreferences, calorie_balance, day_plan, span, valid_training_move
+from planning import (ACTIVITIES, GOALS, SEXES, Profile, TrainingPreferences, calorie_balance,
+                      day_plan, move_targets, span, valid_training_move)
 from training_coach import (DAYS, EXERCISES, read_logs, save_training_log, save_training_preferences,
                             session_lines, training_context)
 
@@ -180,43 +181,67 @@ def day_summary(profile, today, plan, eaten, *, partial_count=0, legacy_count=0)
     st.write(tr(tier.advice, copy.training) if plan.training else tr(tier.recovery, copy.rest))
 
 
-def _change_date(profile, origin, destination, db_path):
-    if move_workout(profile, origin, destination, db_path=db_path):
-        st.session_state.notice = tr(f"训练已从 {origin:%m/%d} 移到 {destination:%m/%d}，两天的目标已更新。",
-                                     f"Workout moved from {month_day(origin)} to {month_day(destination)}. "
-                                     "Both days’ targets have been updated.")
-    else:
-        st.session_state.notice = tr("这两个日期的安排刚刚变过，已刷新为当前日程。",
-                                     "These dates have changed. The calendar now shows the latest schedule.")
+def _preview_date(profile, origin, destination, days, diary):
+    targets = move_targets(profile, origin, destination, days)
+    st.session_state.training_move_preview = (diary, origin, destination, targets)
     st.rerun()
 
 
-def training_plan(profile, today, days, db_path):
-    tomorrow = today + timedelta(days=1)
-    st.subheader(tr("训练安排", "Training schedule"))
+def _review_date(profile, origin, destination, targets, db_path):
+    lines = []
+    for day, (before, after) in zip((origin, destination), targets):
+        change = span(sorted(abs(a - b) for a, b in zip(after.kcal, before.kcal)))
+        delta = (tr(f"增加 {change}", f"up {change}") if after.training
+                 else tr(f"减少 {change}", f"down {change}"))
+        lines.append(f"**{month_day(day)} · {plan_label(after)}**  \n"
+                     f"{span(before.kcal)} → **{span(after.kcal)} kcal** ({delta} kcal)")
+    comparison = "\n\n".join(lines)
+    st.markdown("**" + tr("改期后的每日热量目标", "Daily targets after this move") + "**")
+    st.markdown(comparison)
+    if profile.week_start(origin) != profile.week_start(destination):
+        st.caption(tr("这次改期跨周，两周内的其他日期也会微调，以保持各周总热量。",
+                      "This move crosses two weeks. Other daily targets in those weeks adjust to keep each weekly total."))
+    if st.button(tr("确认改期", "Confirm new date"), key="confirm_training_move", type="primary", width="stretch"):
+        st.session_state.pop("training_move_preview", None)
+        if move_workout(profile, origin, destination, db_path=db_path, require_current_profile=True, expected_targets=targets):
+            st.session_state.notice = tr(f"训练已从 {month_day(origin)} 移到 {month_day(destination)}。",
+                                         f"Workout moved from {month_day(origin)} to {month_day(destination)}.") + "\n\n" + comparison
+        else:
+            st.session_state.notice = tr("训练安排或目标已有变化，这次改期未保存。请重新选择日期。",
+                                         "Your schedule or targets have changed. The move was not saved. Choose new dates.")
+        st.rerun()
+    if st.button(tr("取消", "Cancel"), key="cancel_training_move", width="stretch"):
+        st.session_state.pop("training_move_preview", None)
+        st.rerun()
+
+
+def _schedule_dates(profile, today, days, db_path, diary):
+    upcoming = [today + timedelta(days=i) for i in range(14)]
+    tomorrow = upcoming[1]
+    logged = {row["date"] for row in read_logs(today, upcoming[-1], db_path=db_path)}
     for day, name in [(today, tr("今天", "Today")), (tomorrow, tr("明天", "Tomorrow"))]:
         plan = day_plan(profile, day, days)
         st.write(f"**{name} · {plan_label(plan)}**　{span(plan.kcal)} kcal · "
                  + tr(f"蛋白质 {plan.protein_g} g", f"{plan.protein_g} g protein"))
-    if (today in days) != (tomorrow in days):
+    if (today in days) != (tomorrow in days) and logged.isdisjoint((today.isoformat(), tomorrow.isoformat())):
         origin, destination = (today, tomorrow) if today in days else (tomorrow, today)
         label = (tr("把今天的训练移到明天", "Move today’s workout to tomorrow") if origin == today
                  else tr("把明天的训练移到今天", "Move tomorrow’s workout to today"))
-        if valid_training_move(profile, origin, destination, set(days) - {origin}) and st.button(label, type="primary"):
-            _change_date(profile, origin, destination, db_path)
-    upcoming = [today + timedelta(days=i) for i in range(14)]
+        if valid_training_move(profile, origin, destination, days - {origin}) and st.button(label, type="primary"):
+            _preview_date(profile, origin, destination, days, diary)
     active = [d for d in upcoming if d in days]
-    rest = [d for d in upcoming if d not in days]
+    movable = [d for d in active if d.isoformat() not in logged]
+    rest = [d for d in upcoming if d not in days and d.isoformat() not in logged]
     with st.expander(tr("查看两周安排或改到其他日期", "See the next two weeks or change a date")):
         st.caption(tr("按运动习惯生成的建议训练日，可根据自己的日程改期。",
                       "These dates follow your usual activity level. Move a workout to fit your schedule."))
         st.write(tr("、", ", ").join(month_day(d) for d in active)
                  or tr("接下来两周没有训练。", "No workouts scheduled for the next two weeks."))
-        if active and rest:
+        if movable and rest:
             date_labels = {d: month_day(d) for d in upcoming}
             origin = st.selectbox(tr("把哪天的训练移走？", "Which workout do you want to move?"),
-                                  active, format_func=date_labels.__getitem__, key="reschedule_origin")
-            options = [d for d in rest if valid_training_move(profile, origin, d, set(days) - {origin})]
+                                  movable, format_func=date_labels.__getitem__, key="reschedule_origin")
+            options = [d for d in rest if valid_training_move(profile, origin, d, days - {origin})]
             if not options:
                 st.caption(tr("这两周暂无符合可用日期和恢复间隔的空档。",
                               "There is no other date in this period that fits your availability and recovery days."))
@@ -224,9 +249,22 @@ def training_plan(profile, today, days, db_path):
                 with st.form("reschedule"):
                     destination = st.selectbox(tr("改到哪个休息日？", "Choose a rest day to train instead"),
                                                options, format_func=date_labels.__getitem__, key="reschedule_destination")
-                    submit = st.form_submit_button(tr("确认改期", "Confirm new date"))
+                    submit = st.form_submit_button(tr("预览改期", "Preview move"))
                 if submit:
-                    _change_date(profile, origin, destination, db_path)
+                    _preview_date(profile, origin, destination, days, diary)
+        elif active:
+            st.caption(tr("暂无可改期的训练和休息日组合。", "There are no available dates for a move."))
+
+
+def training_plan(profile, today, days, db_path):
+    st.subheader(tr("训练安排", "Training schedule"))
+    diary = (str(db_path), st.session_state.get("diary_token"), today)
+    preview = st.session_state.get("training_move_preview")
+    if preview and preview[0] == diary:
+        _review_date(profile, *preview[1:], db_path)
+    else:
+        st.session_state.pop("training_move_preview", None)
+        _schedule_dates(profile, today, days, db_path, diary)
     _strength_panel(profile, today, db_path)
 
 
@@ -339,7 +377,8 @@ def _training_log_ui(profile, today, db_path, lang):
 
 def calendar_for_view(profile, today, db_path):
     last = today + timedelta(days=13)
-    return planned_days(profile, profile.week_start(today), profile.week_start(last) + timedelta(days=6), db_path=db_path)
+    return planned_days(profile, profile.week_start(today) - timedelta(days=1),
+                        profile.week_start(last) + timedelta(days=7), db_path=db_path)
 
 
 def settings(profile, db_path, public_demo):
@@ -394,7 +433,8 @@ def settings(profile, db_path, public_demo):
                 clear_diary(db_path=db_path)
                 if public_demo:
                     forget_diary()
-                for key in ("guest", "saved", "draft", "edit_profile", "mituan_state", "edit_training_setup"):
+                for key in ("guest", "saved", "draft", "edit_profile", "mituan_state", "edit_training_setup",
+                            "training_move_preview"):
                     st.session_state.pop(key, None)
                 for key in ("receipt", "capture_ack", "active_draft"):
                     st.session_state.pop(key, None)

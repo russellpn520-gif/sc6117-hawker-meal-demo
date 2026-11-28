@@ -28,6 +28,12 @@ def _close():
         state.update(open=False, pending=None, preferences=False)
 
 
+def open_dinner():
+    state = st.session_state.get("mituan_state")
+    if state:
+        state.update(open=True, pending=None, dinner_requested=True)
+
+
 def _history(turns):
     return [{"role": "user", "content": turn["question"]} for turn in turns[-3:]]
 
@@ -128,6 +134,8 @@ def _panel(today, db_path, public_demo):
     if "food_profile" in state and state["food_profile"] != preferences:
         _refresh_preferences(state, today, db_path)
     state["food_profile"] = preferences
+    if state.pop("dinner_requested", False):
+        _ask(state, "", today, db_path, quick="dinner")
     with st.container(key="mituan_panel"):
         greeting = tr("想看看今天的训练，还是决定晚餐吃什么？",
                       "Check your workout or pick something for dinner.")

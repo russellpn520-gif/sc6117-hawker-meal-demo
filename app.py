@@ -129,7 +129,7 @@ def review_pending(draft, db_path, public_demo):
     else:
         if not is_label and draft["input"].get("method") == "photo":
             suggest_corrections(draft, load_foods(), db_path)
-        confirmed = review_label(draft, db_path) if is_label else review_meal(draft)
+        confirmed = review_label(draft, db_path) if is_label else review_meal(draft, db_path)
         if confirmed:
             payload, items = confirmed
             try:
@@ -140,7 +140,7 @@ def review_pending(draft, db_path, public_demo):
             if saved:
                 st.session_state.receipt = {
                     "totals": total_nutrients([i["nutrients"] for i in items]), "date": draft["captured_at"][:10],
-                    "input": payload["input"],
+                    "input": payload["input"], "confirmed_on": datetime.now(SG_TIME).date().isoformat(),
                 }
             else:
                 st.session_state.notice = tr("这餐已在另一处处理。", "This meal has already been handled in another tab.")
@@ -169,15 +169,20 @@ def draft_label(draft):
     return f"{stamp.month}/{stamp.day} {stamp:%H:%M}　" + (tr("、", ", ").join(names) if names else tr("餐食草稿", "Meal draft"))
 
 
-def home(db_path, public_demo, today, profile, plan, eaten, partial_count, legacy_count):
+def home(db_path, public_demo, today, profile, plan, eaten, meal_count, partial_count, legacy_count):
     pending = list_pending(db_path=db_path)
-    if receipt := st.session_state.get("receipt"):
-        current = receipt["date"] == today.isoformat()
-        saved_receipt(receipt)
-        if not current:
+    receipt = st.session_state.get("receipt")
+    if receipt and receipt.get("confirmed_on", receipt["date"]) == today.isoformat():
+        if pending:
+            st.caption(tr("上一餐已记入日记", "Previous meal saved to your diary"))
+        else:
+            saved_receipt(receipt)
+        if not pending and receipt["date"] != today.isoformat():
             st.caption(tr(f"用餐日期 {receipt['date']}", f"Meal date · {receipt['date']}"))
     if pending:
-        st.subheader(tr("待确认的餐", "Meals to confirm"))
+        count = len(pending)
+        st.subheader(tr("待确认的餐", "Meal to confirm") if count == 1
+                     else tr(f"{count} 餐待确认", f"{count} meals to confirm"))
         docs = {d["id"]: d for d in pending}
         chosen = st.session_state.get("active_draft")
         if chosen not in docs:
@@ -192,14 +197,16 @@ def home(db_path, public_demo, today, profile, plan, eaten, partial_count, legac
             capture_meal(db_path, public_demo)
             text_entry(db_path)
     else:
+        if profile:
+            day_strip(today, plan, eaten, meal_count, partial_count, legacy_count)
         st.subheader(tr("记录一餐", "Log a meal"))
         capture_meal(db_path, public_demo)
         with st.expander(tr("按菜名记餐", "Log by food name")):
             text_entry(db_path)
         usual_meals_ui(db_path)
-    if profile:
-        day_strip(today, plan, eaten, partial_count=partial_count, legacy_count=legacy_count)
-    elif st.button(tr("建立个人计划", "Create a personal plan"), width="stretch"):
+    if profile and pending:
+        day_strip(today, plan, eaten, meal_count, partial_count, legacy_count)
+    elif not profile and st.button(tr("建立个人计划", "Create a personal plan"), width="stretch"):
         st.session_state.edit_profile = True
         st.rerun()
 
@@ -235,7 +242,7 @@ def main(*, public_demo=False):
     statuses = [coverage_status(record) for record in records]
     partial_count, legacy_count = statuses.count("partial"), statuses.count("legacy_review")
     if section == "记餐":
-        home(db_path, public_demo, today, profile, plan, eaten, partial_count, legacy_count)
+        home(db_path, public_demo, today, profile, plan, eaten, len(records), partial_count, legacy_count)
     elif section == "训练安排":
         training_plan(profile, today, days, db_path)
         with st.expander(tr("今日目标明细", "Today's targets")):

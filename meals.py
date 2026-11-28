@@ -184,6 +184,21 @@ def update_pending(draft, *, db_path=None):
                           (_pending_data(draft, draft.get("photo")), draft["id"])).rowcount == 1
 
 
+def update_pending_portion(key, method, variant, *, food_id=None, scope=None, quarters=None, db_path=None):
+    """Merge one user action into a ready draft, preserving edits made in other tabs."""
+    choice = {"variant": variant}
+    if food_id is not None:
+        if type(quarters) is not int or quarters not in range(5):
+            raise ValueError("Eaten portion must be between zero and four quarters")
+        choice["shares"] = {scope: {food_id: quarters}}
+    with closing(open_db(db_path)) as db, db:
+        return db.execute("""
+            UPDATE pending SET data = json_patch(data, ?)
+            WHERE id = ? AND json_extract(data, '$.status') = 'ready'
+              AND json_extract(data, '$.input.method') = ? AND ? <> 'label'
+        """, (json.dumps({"portion_review": choice}, ensure_ascii=False), key, method, method)).rowcount == 1
+
+
 def claim_pending(key, *, db_path=None):
     """Allow at most one worker to recognize this dish during the model timeout."""
     token = uuid4().hex
