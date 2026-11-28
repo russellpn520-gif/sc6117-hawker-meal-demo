@@ -1,8 +1,14 @@
+:root {
+    --mituan-host-clearance: 0px;
+    --mituan-dock-gap: .8rem;
+}
+/* Community Cloud's wordmark and avatar occupy a 46px-high bottom row. */
+:root:has(.mituan-cloud) {--mituan-host-clearance: 46px; --mituan-dock-gap: 10px;}
 .st-key-mituan_dock {
     position: fixed;
     z-index: 90;
     inset-inline-end: max(.8rem, env(safe-area-inset-right, 0px));
-    bottom: calc(.8rem + env(safe-area-inset-bottom, 0px));
+    bottom: calc(var(--mituan-host-clearance) + var(--mituan-dock-gap) + env(safe-area-inset-bottom, 0px));
     width: max-content !important;
     max-width: 10rem;
     gap: 0;
@@ -59,23 +65,23 @@
 .st-key-mituan_actions button, .st-key-mituan_panel button {min-height:44px;}
 .st-key-mituan_panel :is(input,textarea) {font-size:16px;}
 .st-key-mituan_panel {overflow-wrap:anywhere;}
-.stMainBlockContainer:has(.st-key-mituan_dock) {padding-bottom:calc(5rem + env(safe-area-inset-bottom, 0px));}
-.st-key-mituan_dock:has(.mituan-cloud) {inset-inline-end:max(3.7rem,env(safe-area-inset-right, 0px));}
+.stMainBlockContainer:has(.st-key-mituan_dock) {padding-bottom:calc(5rem + var(--mituan-host-clearance) + env(safe-area-inset-bottom, 0px));}
 
 @media (max-width: 640px) {
-    /* The last part of the scrolling page can always move above the launcher.
-       Reserve a compact shelf at the foot of the viewport for thumbs and the host badge. */
-    .stMain:has(.st-key-mituan_dock) {height: calc(100% - 3.32rem - env(safe-area-inset-bottom, 0px));}
-    .st-key-mituan_dock {bottom: calc(.28rem + env(safe-area-inset-bottom, 0px));}
+    :root:not(:has(.mituan-cloud)) {--mituan-dock-gap: .28rem;}
+    /* The page scrolls above both the 48px coach button and the hosted footer. */
+    .stMain:has(.st-key-mituan_dock) {
+        height: calc(100% - 49px - var(--mituan-host-clearance) - var(--mituan-dock-gap) - env(safe-area-inset-bottom, 0px));
+    }
     .stMainBlockContainer:has(.st-key-mituan_dock) {padding-bottom: 1rem;}
     [data-testid="stDialog"]:has(.st-key-mituan_panel) {
         align-items: flex-end;
-        padding: 0;
+        padding: 0 0 var(--mituan-host-clearance);
         background: #11271e42;
     }
     [data-testid="stDialog"]:has(.st-key-mituan_panel) > div:has(> [role="dialog"]) {margin: 0; width: 100%;}
     [data-testid="stDialog"] [role="dialog"]:has(.st-key-mituan_panel) {
-        max-height: calc(100dvh - 1rem);
+        max-height: calc(100dvh - 1rem - var(--mituan-host-clearance));
         max-width: 100%;
         width: 100%;
         overflow-y: auto;
