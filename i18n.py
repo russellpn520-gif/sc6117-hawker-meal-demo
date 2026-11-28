@@ -50,7 +50,29 @@ def language_switch():
                          default=default, key="ui_language_control", on_change=_choose_language, label_visibility="collapsed")
 
 
+SHORT_NAMES = {
+    "cofid-18-374": ("烧鸭（带皮）", "Roast duck with skin"),
+    "fdc-167863": ("焖猪肝", "Braised pork liver"),
+    "fdc-168233": ("烤猪里脊（瘦肉）", "Lean roast pork loin"),
+    "fdc-168463": ("水煮菠菜（未加盐）", "Boiled spinach, unsalted"),
+    "fdc-171228": ("烤牛肩肉", "Grilled beef chuck"),
+    "fdc-172389": ("炖鸡腿肉（去皮）", "Stewed skinless chicken thigh"),
+    "fdc-172475": ("硬豆腐（石膏点制）", "Calcium-set firm tofu"),
+    "fdc-175180": ("熟虾仁", "Cooked shrimp"),
+    "fdc-2708407": ("加油白饭", "Seasoned white rice"),
+    "fdc-2705933": ("烧鸡（带皮）", "Roast chicken with skin"),
+    "fdc-2707132": ("清汤", "Clear broth"),
+    "fdc-2710375": ("黑咖啡", "Black coffee"),
+    "fdc-2705399": ("淡奶", "Evaporated milk"),
+    "fdc-169655": ("白砂糖", "Sugar"),
+    "fdc-173227": ("无糖红茶", "Unsweetened black tea"),
+    "fdc-2705405": ("无糖豆浆", "Unsweetened soy milk"),
+}
+
+
 def food_name(food):
+    if food.food_id in SHORT_NAMES:
+        return tr(*SHORT_NAMES[food.food_id])
     if st.session_state.get("ui_lang") != "en":
         return food.name
     for name in (food.source_name, *food.aliases):

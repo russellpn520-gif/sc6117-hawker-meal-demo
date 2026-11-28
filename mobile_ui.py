@@ -1,11 +1,12 @@
 """Compact, mobile-first presentation for the meal diary."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
+from html import escape
 
 import streamlit as st
 
 from i18n import tr, food_name
-from meals import SG_TIME, coverage_status, load_foods, total_nutrients
+from meals import SG_TIME, coverage_status, load_foods, meal_thumbnail, recent_activity, total_nutrients
 from planning import span
 
 
@@ -31,6 +32,10 @@ def apply_mobile_style():
       .stMain h3 {font-size: 1.18rem;}
       .st-key-meal_header {flex-wrap: nowrap; gap: .5rem;}
       .st-key-meal_header .st-key-language_cache {display: none;}
+      /* Storage components have no UI. Leave them mounted without adding flex gaps. */
+      .st-key-diary_device, .st-key-pending_device {
+        position: absolute; width: 0 !important; height: 0; overflow: hidden; pointer-events: none;
+      }
       .st-key-meal_header h1 {margin: 0; padding: 0; white-space: nowrap;}
       .st-key-meal_header .st-key-ui_language_control {width: max-content; flex: none;}
       .st-key-meal_header .st-key-ui_language_control button {font-size: .84rem;}
@@ -39,6 +44,17 @@ def apply_mobile_style():
         min-height: 44px; padding-block: .55rem;
       }
       [class*="st-key-food_hits_"] .stButton button p {text-align: start; overflow-wrap: anywhere;}
+      .st-key-hawker_drinks {flex-wrap: wrap; gap: .4rem .45rem;}
+      .st-key-hawker_drinks .stButton button {
+        min-height: 44px; max-width: 100%; padding: .4rem .8rem;
+        border: 1px solid #6f927a; border-radius: 2rem;
+        color: inherit; background-color: rgba(114, 157, 119, .12);
+      }
+      .st-key-hawker_drinks .stButton button:is(:hover,:active,:focus-visible):not(:disabled) {
+        color: inherit; border-color: #518766; background-color: rgba(114, 157, 119, .23);
+      }
+      .st-key-hawker_drinks .stButton button:disabled {color: inherit; border-style: dashed; opacity: .8;}
+      .st-key-hawker_drinks .stButton button p {color: inherit; overflow-wrap: anywhere;}
       .stMain button[kind="primary"]:not(:disabled),
       .stMain [data-testid="stBaseButton-primaryFormSubmit"]:not(:disabled) {
         border-color: var(--meal-green);
@@ -85,6 +101,27 @@ def apply_mobile_style():
         margin-bottom: 0;
       }
       .st-key-day_strip p {margin: 0; line-height: 1.4;}
+      .meal-meters {display: grid; gap: .75rem; margin-block: .25rem;}
+      .meal-meter-line {
+        display: flex; align-items: baseline; flex-wrap: wrap; column-gap: .5rem;
+        font-variant-numeric: tabular-nums; line-height: 1.35;
+      }
+      .meal-meter-line .meal-label {font-size: .88rem; margin-inline-end: auto;}
+      .meal-meter-line strong {font-size: 1.18rem; line-height: 1.15;}
+      .meal-meter-line small {font-size: .78rem; color: inherit; opacity: .83;}
+      .meal-track {
+        height: 6px; margin-top: .3rem; border-radius: 1rem; overflow: hidden;
+        background: rgba(115, 146, 123, .22);
+      }
+      .meal-track span {display: block; height: 100%; border-radius: inherit; background: #659779;}
+      .meal-track.in-range span {background: #b59a59;}
+      .meal-track.above-range span {background: #c18950;}
+      .meal-track.no-target {height: 2px;}
+      .meal-rhythm {display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); gap: 2px; margin: .15rem 0 .35rem; padding: 0;}
+      .meal-rhythm li {display: grid; justify-items: center; gap: .3rem; font-size: .78rem; font-variant-numeric: tabular-nums;}
+      .meal-rhythm i {box-sizing: border-box; width: .72rem; height: .72rem; border: 1px solid #779281; border-radius: 50%;}
+      .meal-rhythm .logged i {background: #77a987; border-color: #577e63;}
+      .meal-rhythm .is-today {font-weight: 650;}
       :is(.st-key-day_strip, .st-key-home_before, .st-key-home_pending) [data-testid="stCaptionContainer"] {
         color: inherit; opacity: .84;
       }
@@ -138,34 +175,72 @@ def _open_training():
     st.session_state.section = "训练安排"
 
 
+def _meter(label, value, unit, current, target, bounds, complete):
+    value_text = f"{value} {unit}"
+    tone = "no-target"
+    attrs = 'aria-hidden="true"'
+    fill = 0
+    if bounds:
+        low, high = bounds
+        fill = min(100, max(0, current / low * 100))
+        tone = "in-range" if complete and current >= low else ""
+        if complete and high is not None and current > high:
+            tone = "above-range"
+        attrs = (f'role="progressbar" aria-label="{escape(label)}" aria-valuemin="0" aria-valuemax="100" '
+                 f'aria-valuenow="{round(fill)}" aria-valuetext="{escape(value_text + ", " + target)}"')
+    reference = f' <small>{escape(target)}</small>' if target else ""
+    return (f'<div><div class="meal-meter-line"><span class="meal-label">{escape(label)}</span>'
+            f'<span><strong>{escape(value)}</strong> <small>{unit}</small></span>{reference}</div>'
+            f'<div class="meal-track {tone}" {attrs}><span style="width:{fill:.2f}%"></span></div></div>')
+
+
 def day_strip(today, plan, eaten, meal_count, partial_count=0, legacy_count=0):
-    low, high = plan.kcal
-    kcal = eaten["kcal"]
-    protein = eaten["protein_g"]
+    kcal, protein = eaten["kcal"], eaten["protein_g"]
     note = coverage_note(partial_count, legacy_count)
-    if not meal_count:
-        summary = tr(f"今日参考目标 {span(plan.kcal)} kcal", f"Today's energy target · {span(plan.kcal)} kcal")
-        detail = tr(f"蛋白质目标 {plan.protein_g} g", f"Protein target · {plan.protein_g} g")
-    elif note:
-        summary = tr(f"已记小计约 {kcal:.0f} kcal · 蛋白质 {protein:.1f} g",
-                     f"Logged subtotal · {kcal:.0f} kcal and {protein:.1f} g protein")
-        detail = note
-    elif kcal < low:
-        remaining = span((low - kcal, high - kcal))
-        summary = tr(f"今天还余约 {remaining} kcal", f"About {remaining} kcal left today")
-    elif kcal <= high:
-        summary = tr("今日已在热量参考范围内", "Within today's energy target")
-    else:
-        summary = tr(f"今日已记 {kcal:.0f} kcal，参考范围 {span(plan.kcal)} kcal", f"{kcal:.0f} kcal logged · Target {span(plan.kcal)} kcal")
-    if meal_count and not note:
-        left = plan.protein_g - protein
-        detail = (tr(f"蛋白质还差 {left:.1f} g", f"{left:.1f} g protein left") if left > 0
-                  else tr("蛋白质已达今日目标", "Protein target reached"))
+    kcal_target, protein_target = "", ""
+    heading = tr("今天已记", "Logged today")
+    if plan:
+        kcal_target = tr(f"参考 {span(plan.kcal)}", f"Target {span(plan.kcal)}")
+        protein_target = tr(f"目标 {plan.protein_g} g", f"Target {plan.protein_g} g")
+        heading = tr(f"{today.month} 月 {today.day} 日 · {plan.label}",
+                     f"{today:%d %b} · {'Training day' if plan.training else 'Rest day'}")
+        if not meal_count:
+            heading += tr(" · 今日热量参考", " · Today's energy target")
+    energy_meter = _meter(tr("热量", "Energy"), f"{kcal:.0f}", "kcal", kcal, kcal_target,
+                          plan.kcal if plan else None, not note)
+    protein_meter = _meter(tr("蛋白质", "Protein"), f"{protein:.1f}", "g", protein, protein_target,
+                           (plan.protein_g, None) if plan else None, not note)
     with st.container(key="day_strip"):
-        st.markdown(tr(f"**{today.month} 月 {today.day} 日 · {plan.label}**", f"**{today:%d %b} · {'Training day' if plan.training else 'Rest day'}**"))
-        st.write(summary)
-        st.caption(detail)
-        st.button(tr("调整训练安排", "Adjust training"), on_click=_open_training, key="home_training")
+        st.markdown(f"**{heading}**")
+        st.html(f'<div class="meal-meters">{energy_meter}{protein_meter}</div>')
+        if note:
+            st.markdown(tr(f"以上是已记小计，含{note}。", f"Logged subtotal, including {note}."))
+        elif plan and meal_count:
+            low, high = plan.kcal
+            if kcal < low:
+                remaining = span((low - kcal, high - kcal))
+                feedback = tr(f"今天还余约 {remaining} kcal", f"About {remaining} kcal left today")
+            elif kcal <= high:
+                feedback = tr("今天的热量已在参考范围内", "Today's energy is within your reference range")
+            else:
+                feedback = tr("今天吃得很扎实，下一餐照自己的胃口来。", "A hearty day. Let your appetite guide your next meal.")
+            st.markdown(feedback)
+            if kcal <= high and protein < plan.protein_g:
+                left = plan.protein_g - protein
+                st.caption(tr(f"蛋白质还余 {left:.1f} g", f"{left:.1f} g protein left"))
+        if plan:
+            st.button(tr("调整训练安排", "Adjust training"), on_click=_open_training, key="home_training")
+        else:
+            st.caption(tr("个人目标可按需设置。", "You can set personal targets whenever you like."))
+
+
+def _adjusted_portion(input_data):
+    labels = {0: ("没吃", "none eaten"), .25: ("吃了四分之一", "a quarter eaten"),
+              .5: ("吃了半份", "half eaten"), .75: ("吃了四分之三", "three quarters eaten")}
+    for key, share in input_data.get("eaten_fractions", {}).items():
+        if share in labels and (food := load_foods().get(key)):
+            return f"{food_name(food)}{tr('，', ' · ')}{tr(*labels[share])}"
+    return None
 
 
 def saved_receipt(record, *, just_saved):
@@ -179,7 +254,14 @@ def saved_receipt(record, *, just_saved):
     totals = record["totals"]
     values = tr(f"约 {totals['kcal']:.0f} kcal · 蛋白质 {totals['protein_g']:.1f} g",
                 f"About {totals['kcal']:.0f} kcal · {totals['protein_g']:.1f} g protein")
+    adjustment = _adjusted_portion(record["input"]) if just_saved else None
+    if adjustment:
+        values = tr(f"约 {totals['kcal']:.0f} kcal", f"About {totals['kcal']:.0f} kcal")
     st.text(" · ".join(filter(None, (names, values))))
+    if adjustment:
+        protein = totals["protein_g"]
+        st.caption(tr(f"{adjustment}，已按实吃份量记好。这餐记入了 {protein:.1f} g 蛋白质。",
+                      f"{adjustment}. Logged as eaten, with {protein:.1f} g of protein recorded for this meal."))
     if status == "partial" and (missing := record["input"].get("unmatched_foods")):
         st.caption(tr("未计入：", "Not counted: ") + tr("、".join(missing), ", ".join(record["input"].get("unmatched_foods_en") or missing)))
 
@@ -187,15 +269,32 @@ def saved_receipt(record, *, just_saved):
 def _record_name(item):
     if item.get("source_code") == "package-label":
         return item.get("name") or tr("包装食品", "Packaged food")
+    food = load_foods().get(item.get("food_id"))
+    if food:
+        return food_name(food)
     if st.session_state.get("ui_lang") == "en":
-        food = load_foods().get(item.get("food_id"))
-        if food:
-            return food_name(food)
         return item.get("source_name") or item["name"]
     return item["name"]
 
 
-def meal_history(records, day=None):
+def diary_rhythm(today, *, db_path=None):
+    logged = recent_activity(today, db_path=db_path)
+    title = tr("最近 7 天", "Last 7 days")
+    st.markdown(f"**{title}**")
+    dots = []
+    for offset in range(6, -1, -1):
+        day = today - timedelta(days=offset)
+        active = day in logged
+        state = tr("有记录", "activity logged") if active else tr("暂无记录", "no activity logged")
+        label = f"{day.isoformat()} · {state}"
+        text = tr("今天", "Today") if day == today else str(day.day)
+        classes = ("logged " if active else "") + ("is-today" if day == today else "")
+        dots.append(f'<li class="{classes}" aria-label="{label}" title="{label}"><i aria-hidden="true"></i>{text}</li>')
+    st.html(f'<ol class="meal-rhythm" aria-label="{title}">{"".join(dots)}</ol>')
+    st.caption(tr("记过餐或完成训练的日子会亮起。", "A green dot marks a meal or a completed workout."))
+
+
+def meal_history(records, day=None, *, db_path=None):
     st.subheader(tr(f"{day:%m 月 %d 日}的记录", f"Diary · {day:%d %b}") if day else tr("今日记录", "Today's diary"))
     if not records:
         st.caption(tr("确认吃下的份量后，这餐就会出现在这里。", "Confirm a meal to see your food and portions here."))
@@ -220,7 +319,12 @@ def meal_history(records, day=None):
             title += tr("（旧记录待核对）", " (older entry to review)")
         stamp = (datetime.fromisoformat(original["captured_at"]).astimezone(SG_TIME)
                  if original.get("captured_at") else record["at"])
-        with st.expander(tr(f"{stamp:%H:%M}　{title}　·　约 {record['totals']['kcal']:.0f} kcal", f"{stamp:%H:%M} · {title} · About {record['totals']['kcal']:.0f} kcal")):
+        details = st.expander(tr(f"{stamp:%H:%M}　{title}　·　约 {record['totals']['kcal']:.0f} kcal",
+                                 f"{stamp:%H:%M} · {title} · About {record['totals']['kcal']:.0f} kcal"),
+                              key=f"meal_history_{record['id']}", on_change="rerun")
+        with details:
+            if details.open and record.get("has_thumbnail") and (photo := meal_thumbnail(record["id"], db_path=db_path)):
+                st.image(photo, width=240, alt=tr("这餐的照片", "Photo of this meal"))
             if original.get("method") == "label":
                 from label_ui import label_history
                 label_history(items[0])

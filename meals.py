@@ -6,9 +6,12 @@ import re
 import sqlite3
 from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
+from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
 from time import time
+
+from PIL import Image, ImageOps
 
 from planning import Profile
 from catalog import NUTRIENTS, ROOT, load_foods
@@ -106,7 +109,7 @@ def open_db(db_path=None):
     db.executescript("""
         CREATE TABLE IF NOT EXISTS meals (
             id TEXT PRIMARY KEY, day TEXT NOT NULL, confirmed_at TEXT NOT NULL,
-            input TEXT NOT NULL, items TEXT NOT NULL, totals TEXT NOT NULL
+            input TEXT NOT NULL, items TEXT NOT NULL, totals TEXT NOT NULL, thumbnail BLOB
         );
         CREATE INDEX IF NOT EXISTS meals_by_day ON meals(day);
         CREATE TABLE IF NOT EXISTS workouts (day TEXT PRIMARY KEY);
@@ -133,6 +136,12 @@ def open_db(db_path=None):
             UPDATE draft_sync SET revision = revision + 1;
         END;
     """)
+    if "thumbnail" not in {row[1] for row in db.execute("PRAGMA table_info(meals)")}:
+        # Another tab can open and upgrade the same old diary at the same time.
+        with db:
+            db.execute("BEGIN IMMEDIATE")
+            if "thumbnail" not in {row[1] for row in db.execute("PRAGMA table_info(meals)")}:
+                db.execute("ALTER TABLE meals ADD COLUMN thumbnail BLOB")
     return db
 
 
@@ -272,6 +281,31 @@ class IncompleteMealError(ValueError):
     """The caller must resolve missing foods or explicitly save a partial meal."""
 
 
+class MealChangedError(ValueError):
+    """The confirmation view predates a change to the items in this draft."""
+
+
+def _meal_thumbnail(photo):
+    if not photo:
+        return None
+    try:
+        with Image.open(BytesIO(photo)) as original:
+            if original.format not in {"JPEG", "PNG"} or original.width * original.height > 25_000_000:
+                return None
+            original.draft("RGB", (640, 640))
+            image = ImageOps.exif_transpose(original).convert("RGB")
+            for edge, quality in ((320, 78), (256, 66), (192, 54), (128, 45)):
+                image.thumbnail((edge, edge), Image.Resampling.LANCZOS)
+                output = BytesIO()
+                image.save(output, "JPEG", quality=quality, optimize=True)
+                if output.tell() <= 25_000:
+                    return output.getvalue()
+    except (OSError, ValueError, Image.DecompressionBombError):
+        # A damaged photo from an older draft must not block logging the meal.
+        return None
+    return None
+
+
 def save_meal(draft, items, *, db_path=None):
     if not items:
         raise ValueError("请至少选一项食物。")
@@ -283,17 +317,22 @@ def save_meal(draft, items, *, db_path=None):
     sums = total_nutrients([item["nutrients"] for item in items])
     with closing(open_db(db_path)) as db, db:
         db.execute("BEGIN IMMEDIATE")
-        saved = db.execute("SELECT captured_at FROM pending WHERE id = ?", (draft["id"],)).fetchone()
+        saved = db.execute("SELECT captured_at, photo, json_extract(data, '$.quick_drinks') FROM pending WHERE id = ?",
+                           (draft["id"],)).fetchone()
         if not saved and ("captured_at" in draft or
                           db.execute("SELECT 1 FROM discarded WHERE id = ?", (draft["id"],)).fetchone()):
             return False
+        if saved and json.loads(saved[2] or "[]") != draft.get("quick_drinks", []):
+            raise MealChangedError("The drinks on this draft have changed.")
         day = datetime.fromisoformat(saved[0]).astimezone(SG_TIME).date() if saved else now.date()
         original = {**draft["input"], "captured_at": saved[0]} if saved else draft["input"]
+        photo = saved[1] if saved else draft.get("photo")
+        thumbnail = _meal_thumbnail(photo) if original.get("method") != "label" else None
         payload = [json.dumps(part, ensure_ascii=False) for part in (original, items, sums)]
         inserted = db.execute("""
-            INSERT INTO meals(id, day, confirmed_at, input, items, totals)
-            VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING
-        """, (draft["id"], day.isoformat(), now.isoformat(), *payload)).rowcount
+            INSERT INTO meals(id, day, confirmed_at, input, items, totals, thumbnail)
+            VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING
+        """, (draft["id"], day.isoformat(), now.isoformat(), *payload, thumbnail)).rowcount
         if saved:
             db.execute("DELETE FROM pending WHERE id = ?", (draft["id"],))
         return bool(inserted)
@@ -306,12 +345,32 @@ def list_meals(day, *, db_path=None):
 def list_meals_between(start, end, *, db_path=None):
     with closing(open_db(db_path)) as db:
         records = db.execute("""
-            SELECT day, confirmed_at, input, items, totals FROM meals
+            SELECT id, day, confirmed_at, input, items, totals, thumbnail IS NOT NULL FROM meals
             WHERE day BETWEEN ? AND ? ORDER BY confirmed_at DESC
         """, (start.isoformat(), end.isoformat())).fetchall()
-    return [{"day": date.fromisoformat(day), "at": datetime.fromisoformat(at), "input": json.loads(raw),
-             "items": json.loads(items), "totals": json.loads(totals)}
-            for day, at, raw, items, totals in records]
+    return [{"id": key, "day": date.fromisoformat(day), "at": datetime.fromisoformat(at), "input": json.loads(raw),
+             "items": json.loads(items), "totals": json.loads(totals), "has_thumbnail": bool(has_photo)}
+            for key, day, at, raw, items, totals, has_photo in records]
+
+
+def meal_thumbnail(key, *, db_path=None):
+    with closing(open_db(db_path)) as db:
+        row = db.execute("SELECT thumbnail FROM meals WHERE id = ?", (key,)).fetchone()
+    return row[0] if row else None
+
+
+def recent_activity(today, *, db_path=None):
+    """Dates with a saved meal or a completed session, including today and the six days before."""
+    from training_coach import LOG_SCHEMA
+
+    start = today - timedelta(days=6)
+    with closing(open_db(db_path)) as db:
+        db.execute(LOG_SCHEMA)
+        days = db.execute("""
+            SELECT day FROM meals WHERE day BETWEEN :start AND :end UNION
+            SELECT day FROM training_log WHERE day BETWEEN :start AND :end AND status IN ('comfortable', 'challenging')
+        """, {"start": start.isoformat(), "end": today.isoformat()})
+        return {date.fromisoformat(day) for day, in days}
 
 
 def coverage_status(record):
@@ -410,4 +469,5 @@ def clear_diary(*, db_path=None):
         db.execute("DELETE FROM photo_access")
         db.execute("DROP TABLE IF EXISTS nutrition_preferences")
         db.execute("DROP TABLE IF EXISTS dinner_mode")
+        db.execute("DROP TABLE IF EXISTS nearby_landmark")
         db.execute("DROP TABLE IF EXISTS training_log")

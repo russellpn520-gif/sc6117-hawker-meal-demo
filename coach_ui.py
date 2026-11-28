@@ -1,11 +1,12 @@
 """Mobile entry point for the team’s nutrition and training coach."""
 
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import streamlit as st
 
 from i18n import tr
-from meals import get_profile
+from meals import SG_TIME, get_profile
 
 
 _STYLE = Path(__file__).with_name("coach.css")
@@ -26,6 +27,7 @@ def _close():
     state = st.session_state.get("mituan_state")
     if state:
         state.update(open=False, pending=None, preferences=False, dinner_only=False)
+        state.pop("radar", None)
 
 
 def open_dinner():
@@ -80,8 +82,21 @@ def _show_reply(state, today, db_path):
             return
     else:
         st.text(turn["question"])
-    st.markdown(reply["text"])
-    if sources := reply.get("dinner_references"):
+    nearby = reply.get("dinner_mode") == "out"
+    if not nearby or any(t != "PlanDinner" for t in reply.get("tool_names", [])):
+        st.markdown(reply["text"])
+    if nearby:
+        from nearby_ui import nearby_dinner
+
+        draft_id = nearby_dinner(state, today, db_path, reply.get("dinner_budget_sgd"))
+        if draft_id:
+            st.session_state.active_draft = draft_id
+            st.session_state.section = "记餐"
+            st.session_state.edit_profile = False
+            st.session_state.pop("receipt", None)
+            _close()
+            st.rerun()
+    elif sources := reply.get("dinner_references"):
         with st.expander(tr("查看参考份量与来源", "Reference portions and sources")):
             for source in sources:
                 st.markdown(f"[{source['name']} · {source['grams']} g]({source['source_url']})")
@@ -89,7 +104,7 @@ def _show_reply(state, today, db_path):
     followups = []
     if turn["quick"] == "today" or ("ReadDiary" in tools_used and turn["quick"] != "week"):
         followups.append("week")
-    if turn["quick"] == "training" or "ReadWorkout" in tools_used:
+    if (turn["quick"] == "training" or "ReadWorkout" in tools_used) and not st.session_state.get("practice_mode"):
         followups.append("move")
     if isinstance(reply.get("meal_context"), dict) and turn["quick"] != "shopping":
         followups.append("shopping")
@@ -114,12 +129,17 @@ def _show_reply(state, today, db_path):
         label = (tr("调整训练资料", "Edit workout preferences") if profile else
                  tr("建立个人计划", "Create a personal plan"))
         if st.button(label, key="mituan_setup"):
-            state["training_setup"] = True
+            if profile:
+                st.session_state.section = "训练安排"
+                st.session_state.edit_training_setup = True
+                st.session_state.edit_profile = False
+            else:
+                st.session_state.edit_profile = True
             _close()
             st.rerun()
     if reply.get("show_nutrition"):
         state["preferences"] = True
-    elif turn["quick"] in {"dinner", "shopping"} or "PlanDinner" in tools_used:
+    elif not nearby and (turn["quick"] in {"dinner", "shopping"} or "PlanDinner" in tools_used):
         if st.button(tr("饮食偏好与预算", "Food preferences and budget"), key="mituan_open_preferences"):
             state["preferences"] = True
     if state["preferences"]:
@@ -149,6 +169,19 @@ def _refresh_preferences(state, today, db_path):
             state["food_notice"] = True
 
 
+def _greeting(today, db_path):
+    from coach import _today_values
+
+    rows, _, _, plan = _today_values(get_profile(db_path=db_path), today, db_path)
+    if rows and timedelta() <= datetime.now(SG_TIME) - rows[0]["at"] < timedelta(minutes=30):
+        return tr("这餐记好啦。晚餐想在附近吃点什么？", "Meal’s in the diary. Shall we find something nearby for dinner?")
+    if plan and plan.training:
+        return tr("今天有训练。要看看动作，还是把训练挪一天？", "There’s a workout today. Want to see it or move it to another day?")
+    if plan:
+        return tr("今天歇一歇。晚餐想出去吃，还是自己做？", "A rest day today. Heading out for dinner or cooking at home?")
+    return tr("晚餐有想法了吗？一起看看附近有什么。", "Any dinner plans? Let’s see what’s nearby.")
+
+
 def _panel(today, db_path, public_demo):
     from nutrition_coach import get_preferences
     from photo_access import coach_api_key
@@ -169,30 +202,32 @@ def _panel(today, db_path, public_demo):
         if state.get("dinner_only"):
             _show_reply(state, today, db_path)
             return
-        greeting = tr("想看看今天的训练，还是决定晚餐吃什么？",
-                      "Check your workout or pick something for dinner.")
+        greeting = _greeting(today, db_path)
         st.html(f'<div class="mituan-intro">{_FACE}<p>{greeting}</p></div>')
         if state.pop("food_notice", False):
             st.info(tr("饮食偏好已更新。请再问一次，以便按新偏好和这次的预算规划。",
                        "Your food preferences changed. Ask again to plan with your new preferences and budget."))
         answer = st.container()
+        practice = st.session_state.get("practice_mode", False)
         with st.container(key="mituan_actions", horizontal=True, gap="xsmall"):
-            for action in ("today", "training", "dinner"):
+            actions = ("today", "training", "dinner", "move") if practice else ("today", "training", "dinner")
+            for action in actions:
                 if st.button(tr(*_ACTIONS[action]), key=f"mituan_quick_{action}"):
                     _ask(state, "", today, db_path, quick=action)
-        with st.form("mituan_ask", clear_on_submit=True, border=False):
-            question = st.text_input(tr("问米团", "Ask Mituan"), key="mituan_question", max_chars=600,
-                                     help=tr("输入的问题及近期提问会发送给 OpenAI。快捷问题不消耗 API 额度。",
-                                             "Typed questions and recent questions go to OpenAI. Quick actions use no API credits."),
-                                     placeholder=tr("例如：明天没空，训练怎么改？",
-                                                    "e.g. Can I move my next workout?"))
-            submitted = st.form_submit_button(tr("发送问题", "Send question"))
-        if submitted and question.strip():
-            state["pending"] = question.strip()
-        if state["pending"]:
-            api_key = coach_api_key(public_demo=public_demo)
-            if api_key:
-                _ask(state, state["pending"], today, db_path, api_key=api_key)
+        if not practice:
+            with st.form("mituan_ask", clear_on_submit=True, border=False):
+                question = st.text_input(tr("问米团", "Ask Mituan"), key="mituan_question", max_chars=600,
+                                         help=tr("输入的问题及近期提问会发送给 OpenAI。快捷问题不消耗 API 额度。",
+                                                 "Typed questions and recent questions go to OpenAI. Quick actions use no API credits."),
+                                         placeholder=tr("例如：明天没空，训练怎么改？",
+                                                        "e.g. Can I move my next workout?"))
+                submitted = st.form_submit_button(tr("发送问题", "Send question"))
+            if submitted and question.strip():
+                state["pending"] = question.strip()
+            if state["pending"]:
+                api_key = coach_api_key(public_demo=public_demo)
+                if api_key:
+                    _ask(state, state["pending"], today, db_path, api_key=api_key)
         with answer:
             _show_reply(state, today, db_path)
             if len(state["turns"]) > 1:
@@ -208,13 +243,6 @@ def coach_entry(today, db_path, public_demo):
     if not state or state["diary"] != diary:
         state = dict(diary=diary, open=False, pending=None, preferences=False, turns=[])
         st.session_state.mituan_state = state
-    if state.pop("training_setup", False):
-        if get_profile(db_path=db_path):
-            st.session_state.section = "训练安排"
-            st.session_state.edit_training_setup = True
-            st.session_state.edit_profile = False
-        else:
-            st.session_state.edit_profile = True
     st.html(_STYLE)
     with st.container(key="mituan_dock"):
         cloud_mark = ' class="mituan-cloud"' if public_demo else ""

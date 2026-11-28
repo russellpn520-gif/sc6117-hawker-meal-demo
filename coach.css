@@ -65,6 +65,48 @@
 .st-key-mituan_actions button, .st-key-mituan_panel button {min-height:44px;}
 .st-key-mituan_panel :is(input,textarea) {font-size:16px;}
 .st-key-mituan_panel {overflow-wrap:break-word;}
+[role="dialog"]:has(.st-key-mituan_panel) button[aria-label="Close"] {
+    width:44px; height:44px; top:.55rem; inset-inline-end:.65rem;
+    display:grid; place-items:center;
+}
+.st-key-hawker_radar .hawker-card {line-height:1.48; min-width:0; overflow-wrap:anywhere;}
+.hawker-card :is(h4,p,blockquote) {margin:0;padding:0;}
+.hawker-card h4 {font-size:1.12rem;line-height:1.35;margin:.18rem 0 .25rem;}
+.hawker-card .hawker-place, .hawker-card .hawker-note {font-size:.86rem;}
+.hawker-card .hawker-reason {font-size:.92rem;}
+.hawker-card blockquote {
+    border:0; border-inline-start:3px solid #72a183; background:rgba(117, 164, 122, .12);
+    color:inherit; margin:.6rem 0; padding:.54rem .72rem; border-radius:0 .5rem .5rem 0;
+}
+.hawker-card .hawker-nutrition {font-variant-numeric:tabular-nums;font-size:.94rem;font-weight:600;}
+.hawker-card .hawker-note {margin:.15rem 0 .28rem;}
+.st-key-hawker_radar :is(button,a[data-testid*="Button"],[data-testid="stLinkButton"] a, details>summary) {
+    min-height:44px; align-content:center;
+}
+.st-key-hawker_radar [role="group"], .st-key-hawker_radar [role="radiogroup"] {
+    flex-wrap:wrap; max-width:100%;
+}
+.st-key-hawker_radar :is([role="radio"][aria-checked="true"],button[kind="primary"]) {
+    background:#285e4b; color:white; border-color:#285e4b;
+}
+.st-key-hawker_radar [data-testid="stHorizontalBlock"] {gap:.45rem;}
+.st-key-hawker_radar [data-testid="stHorizontalBlock"] :is(button,a) {padding-inline:.62rem;}
+.st-key-hawker_radar [data-testid="stCaptionContainer"] {color:inherit;opacity:.88;}
+.st-key-hawker_origin {display:grid !important; grid-template-columns:minmax(0,1fr) max-content; align-items:center;}
+.st-key-hawker_origin [data-testid="stElementContainer"] {min-width:0 !important;}
+[class*="st-key-hawker_actions_"] {
+    display:grid !important; grid-template-columns:minmax(0,1fr) minmax(0,1.23fr); align-items:stretch;
+}
+[class*="st-key-hawker_actions_"] [data-testid="stElementContainer"] {min-width:0 !important; width:100% !important;}
+.st-key-hawker_radar [class*="st-key-hawker_actions_"] :is(button,a) {min-height:48px; white-space:normal; line-height:1.25;}
+[class*="st-key-hawker_actions_"] :is(.stMarkdownEllipsis,.stMarkdownEllipsis p) {
+    white-space:normal; text-wrap:balance; overflow:visible; text-overflow:clip;
+}
+.st-key-hawker_heading {
+    display:grid !important; grid-template-columns:minmax(0,1fr) max-content; gap:.5rem; align-items:center;
+}
+.st-key-hawker_heading [data-testid="stElementContainer"] {min-width:0 !important; max-width:100%;}
+.st-key-hawker_heading h3 {padding:0; margin:0; line-height:1.25;}
 .st-key-mituan_panel button:focus-visible {
     outline: 3px solid var(--meal-focus, #5a9874);
     outline-offset: 2px;

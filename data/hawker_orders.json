@@ -1,0 +1,807 @@
+{
+  "as_of": "2026-11-28",
+  "sources": {
+    "north": "https://www.ntu.edu.sg/life-at-ntu/leisure-and-dining/general-directory",
+    "chicken": "https://ch-api.healthhub.sg/api/public/content/d29ae76821fb44a7a89fed0a82e9b611?v=ace5320f",
+    "encik": "https://www.capitaland.com/sg/en/shop/malls/stores/encik-tan.html",
+    "biryani": "https://www.bismillahbiryani.com/",
+    "nus": "https://uci.nus.edu.sg/campus-life/campus-services/retail-dining/university-town/",
+    "utown": "https://blog.nus.edu.sg/reslife/2022/07/04/healthier-food-options-in-utown/",
+    "utown_wagyu": "https://www.waacow.sg/products/original-wagyu-beef",
+    "jurong_venue": "https://www.changcheng.sg/jw50-hawker-heritage",
+    "jurong_stalls": "https://www.visitjurong.com/shop/changi-village-fried-hokkien-mee",
+    "techno": "https://nus.edu.sg/alumnet/thealumnus/issue-120/community/alumni-happenings/details/Opening-TechnoEdgeCanteen",
+    "subway": "https://subwayisfresh.com.sg/menu_item/veggie-delite/",
+    "lau": "https://www.laupasat.sg/hawkers/",
+    "maxwell": "https://guide.michelin.com/sg/en/singapore-region/singapore/restaurant/tian-tian-hainanese-chicken-rice",
+    "prawn": "https://guide.michelin.com/sg/en/singapore-region/singapore/restaurant/zhi-wei-xian-zion-road-big-prawn-noodle",
+    "zion": "https://guide.michelin.com/sg/en/singapore-region/singapore/restaurant/no-18-zion-road-fried-kway-teow",
+    "campustimes": "https://uci.nus.edu.sg/campus-life/campus-services/retail-dining/kent-ridge/",
+    "ntuplaces": "https://event.ntu.edu.sg/cocoon2026/pages/sightseeing-and-food",
+    "koh": "https://guide.michelin.com/sg/en/singapore-region/singapore/restaurant/koh-brother-pig-s-organ-soup",
+    "claypot": "https://guide.michelin.com/sg/en/singapore-region/singapore/restaurant/lian-he-ben-ji-claypot"
+  },
+  "venues": {
+    "jw50": {
+      "names": ["裕廊西熟食中心", "Jurong West Hawker Centre"],
+      "nea_name": "Jurong West Hawker Centre",
+      "source": "jurong_venue"
+    },
+    "ntucourt": {
+      "names": ["南大北区食阁", "NTU North Spine Food Court"],
+      "coords": [
+        1.34713,
+        103.68003
+      ],
+      "source": "north"
+    },
+    "ntuplaza": {
+      "names": ["南大北区广场", "NTU North Spine Plaza"],
+      "coords": [
+        1.34739,
+        103.68054
+      ],
+      "source": "ntuplaces"
+    },
+    "utown": {
+      "names": ["国大大学城 Flavours 食阁", "Flavours @ NUS UTown"],
+      "coords": [
+        1.30498,
+        103.77209
+      ],
+      "source": "nus"
+    },
+    "utownsrc": {
+      "names": ["国大大学城 Stephen Riady Centre", "NUS Stephen Riady Centre"],
+      "coords": [
+        1.30487,
+        103.77228
+      ],
+      "source": "nus"
+    },
+    "techno": {
+      "names": ["国大工程学院食堂", "NUS Techno Edge"],
+      "coords": [
+        1.29849,
+        103.77142
+      ],
+      "source": "campustimes",
+      "closed_evenings": [5, 6]
+    },
+    "lau": {
+      "names": ["老巴刹", "Lau Pa Sat"],
+      "coords": [
+        1.28064,
+        103.85047
+      ],
+      "source": "lau"
+    },
+    "maxwell": {
+      "names": ["麦士威熟食中心", "Maxwell Food Centre"],
+      "nea_name": "Maxwell Food Centre (Kim Hua Market)",
+      "source": "maxwell"
+    },
+    "tiong": {
+      "names": ["中峇鲁市场", "Tiong Bahru Market"],
+      "nea_name": "Tiong Bahru Market",
+      "source": "koh"
+    },
+    "zion": {
+      "names": ["锡安路河畔熟食中心", "Zion Riverside Food Centre"],
+      "nea_name": "Zion Riverside Food Centre",
+      "source": "zion"
+    },
+    "chinatown": {
+      "names": ["牛车水大厦熟食中心", "Chinatown Complex Food Centre"],
+      "nea_name": "Smith Street Blk 335 (Chinatown Complex Market)",
+      "source": "claypot"
+    }
+  },
+  "orders": [
+    {
+      "id": "jurong-hokkien",
+      "venue": "jw50",
+      "source": "jurong_stalls",
+      "stall": ["樟宜村炒福建面", "Changi Village Fried Hokkien Mee"],
+      "dish": ["炒福建虾面", "Fried Hokkien prawn mee"],
+      "order": ["福建虾面一份，小辣椒另外放，给我一粒酸柑。", "One Hokkien prawn mee, sambal on the side and a calamansi, please."],
+      "note": ["先尝虾汤收进面里的味道，再挤一点酸柑。", "Try a forkful of the noodles first, then squeeze in a little calamansi."],
+      "maps_query": "Changi Village Fried Hokkien Mee 01-11 Jurong West Hawker Centre Singapore",
+      "portion_items": {"sgstudy-fried-hokkien-mee": 328},
+      "treat_friendly": true, "diets": [],
+      "ingredients": ["rice", "fish", "egg", "oil"], "ingredients_known": false,
+      "allergens": ["shellfish", "fish", "gluten", "egg", "soy"], "closed_evenings": [0, 1, 2]
+    },
+    {
+      "id": "jurong-veg-rice",
+      "venue": "jw50",
+      "source": "jurong_stalls",
+      "stall": ["素菜饭档 · 现场搭配", "Vegetarian rice counter · custom order"],
+      "dish": ["白饭配豆腐和时蔬", "Tofu and vegetables over rice"],
+      "order": ["请问今天有原味豆腐和烫青菜吗？配白饭，不浇汁，不加蛋奶或鱼露。", "Is plain tofu and blanched veg available today? With plain rice, no gravy, egg, dairy or fish sauce, please."],
+      "note": ["先看素食档今天有什么菜，再挑两样配饭。", "Check the vegetarian stall’s trays and pick two sides to go with the rice."],
+      "maps_query": "Vegetarian mixed rice Jurong West Hawker Centre 50 Jurong West St 61 Singapore",
+      "portion_items": {"white-rice": 150, "fdc-172475": 130, "fdc-2709593": 100},
+      "treat_friendly": false, "diets": ["vegan", "vegetarian", "pescatarian"],
+      "ingredients": ["rice", "tofu", "greens", "oil"], "ingredients_known": true,
+      "allergens": ["soy"]
+    },
+    {
+      "id": "ntu-white-chicken",
+      "venue": "ntucourt",
+      "source": "chicken",
+      "stall": ["北区食阁鸡饭档", "North Spine chicken rice stall"],
+      "dish": ["去皮白鸡配半份白饭", "Skinless white chicken with less rice"],
+      "order": ["白鸡去皮，可以换白饭吗？半饭，黄瓜照放，酱另放。", "White chicken without skin. Plain rice if available, half rice, cucumber and sauce on the side."],
+      "note": ["黄瓜和白鸡夹在一起吃，蘸酱可以自己拿捏。", "A slice of cucumber with each bite of chicken leaves the dip up to you."],
+      "maps_query": "NTU North Spine Food Court chicken rice 76 Nanyang Drive Singapore",
+      "portion_items": {
+        "white-rice": 90,
+        "boiled-chicken": 110,
+        "fdc-2709784": 35
+      },
+      "treat_friendly": false,
+      "diets": [],
+      "ingredients": [
+        "chicken",
+        "rice",
+        "cucumber",
+        "ginger",
+        "oil"
+      ],
+      "ingredients_known": true,
+      "allergens": [
+        "soy",
+        "gluten",
+        "sesame"
+      ]
+    },
+    {
+      "id": "ntu-roast-chicken",
+      "venue": "ntucourt",
+      "source": "chicken",
+      "stall": ["北区食阁鸡饭档", "North Spine chicken rice stall"],
+      "dish": ["烧鸡饭", "Roast chicken rice"],
+      "order": ["烧鸡饭一份，辣椒另放，谢谢。", "One roast chicken rice, chilli on the side, please."],
+      "note": ["烧鸡和饭是这盘的主角，辣椒可以吃到一半再加。", "Try the chicken and rice together first, then add chilli if you like."],
+      "maps_query": "NTU North Spine Food Court chicken rice 76 Nanyang Drive Singapore",
+      "portion_items": {
+        "sgstudy-roasted-chicken-rice": 285
+      },
+      "treat_friendly": true,
+      "diets": [],
+      "ingredients": [
+        "chicken",
+        "rice",
+        "ginger",
+        "oil",
+        "cucumber"
+      ],
+      "ingredients_known": false,
+      "allergens": [
+        "soy",
+        "gluten",
+        "sesame"
+      ]
+    },
+    {
+      "id": "ntu-fishballs",
+      "venue": "ntuplaza",
+      "source": "encik",
+      "stall": ["Encik Tan 面档", "Encik Tan noodle counter"],
+      "dish": ["潮式鱼丸汤面", "Fishball noodle soup"],
+      "order": ["鱼丸面要汤的，不加辣，葱花照放。", "Fishball noodle soup, no chilli, spring onions are fine."],
+      "note": ["想慢慢喝口汤时，这碗不用另外配汤。", "When you feel like sipping broth, it comes with the noodles."],
+      "maps_query": "Encik Tan North Spine Plaza NTU Singapore",
+      "portion_items": {
+        "fishball-noodles": 550
+      },
+      "treat_friendly": false,
+      "diets": [],
+      "ingredients": ["fish", "oil"],
+      "ingredients_known": false,
+      "allergens": [
+        "fish",
+        "egg",
+        "gluten",
+        "soy",
+        "shellfish"
+      ]
+    },
+    {
+      "id": "ntu-mutton",
+      "venue": "ntuplaza",
+      "source": "biryani",
+      "stall": ["Bismillah 焖饭", "Bismillah Biryani"],
+      "dish": ["羊肉香料焖饭", "Mutton dum biryani"],
+      "order": ["羊肉 biryani 一份，酸奶酱另放。", "One mutton dum biryani, raita on the side."],
+      "note": ["翻一翻长米，底下能找到一起焖的羊肉和香料。", "Lift the long-grain rice to find the meat and spices cooked underneath."],
+      "maps_query": "Bismillah Biryani North Spine Plaza NTU Singapore",
+      "portion_items": {
+        "sgstudy-boneless-mutton-biryani": 459
+      },
+      "treat_friendly": true,
+      "diets": [],
+      "ingredients": [
+        "rice",
+        "ginger",
+        "oil"
+      ],
+      "ingredients_known": false,
+      "allergens": ["milk", "tree_nut"],
+      "closed_evenings": [5, 6]
+    },
+    {
+      "id": "ntu-veg-sub",
+      "venue": "ntuplaza",
+      "source": "subway",
+      "stall": ["Subway 三明治档", "Subway sandwich counter"],
+      "dish": ["多谷蔬菜潜艇堡", "Multigrain Veggie Delite"],
+      "order": ["六寸 Veggie Delite，多谷面包、生菜番茄黄瓜青椒洋葱，不加酱和芝士。", "One six-inch Veggie Delite on multigrain with lettuce, tomato, cucumber, peppers and onions. No sauce or cheese."],
+      "note": ["生菜和黄瓜保留脆口；这里用食物库的全麦蔬菜三明治作参考。", "Lettuce and cucumber keep their crunch. The nutrition reference is a generic wheat vegetable sandwich."],
+      "maps_query": "Subway NTU North Spine Plaza Singapore",
+      "portion_items": {
+        "fdc-2709134": 154
+      },
+      "treat_friendly": false,
+      "diets": ["vegetarian", "pescatarian"],
+      "ingredients": [
+        "greens",
+        "cucumber",
+        "tomato",
+        "oil"
+      ],
+      "ingredients_known": false,
+      "allergens": [
+        "egg",
+        "milk",
+        "soy",
+        "gluten"
+      ],
+      "checked_allergens": [
+        "egg",
+        "milk",
+        "soy",
+        "gluten",
+        "fish",
+        "shellfish",
+        "peanut",
+        "tree_nut",
+        "sesame",
+        "sulphites"
+      ]
+    },
+    {
+      "id": "nus-tech-fish",
+      "venue": "techno",
+      "source": "techno",
+      "stall": ["鱼汤档 · 到档询问", "Fish soup counter · ask for this order"],
+      "dish": ["清汤鱼片粗米粉", "Sliced fish thick bee hoon soup"],
+      "order": ["粗米粉，清汤鱼片，不要炸鱼、不加淡奶。", "Thick bee hoon with sliced fish in clear soup, no fried fish or evaporated milk."],
+      "note": ["鱼片和粗米粉泡在热汤里，想喝几口汤自己决定。", "A bowl of fish and thick noodles with as much or as little broth as you want."],
+      "maps_query": "Fish soup Techno Edge NUS Singapore",
+      "portion_items": {
+        "fdc-168914": 155,
+        "steamed-fish": 110,
+        "fdc-171606": 160
+      },
+      "treat_friendly": false,
+      "diets": [],
+      "ingredients": [
+        "rice",
+        "fish",
+        "ginger"
+      ],
+      "ingredients_known": false,
+      "allergens": [
+        "fish",
+        "shellfish",
+        "soy",
+        "gluten"
+      ]
+    },
+    {
+      "id": "nus-tech-plant",
+      "venue": "techno",
+      "source": "techno",
+      "stall": ["素食饭档 · 现场搭配", "Vegetarian rice counter · custom order"],
+      "dish": ["豆腐青菜白饭", "Plain tofu and greens with rice"],
+      "order": ["白饭、原味豆腐和烫青菜，不加蛋奶、鱼露或浇汁；今天能这样配吗？", "Plain rice, plain tofu and blanched greens. No egg, dairy, fish sauce or gravy. Is that available today?"],
+      "note": ["先看看当日的菜盘，有原味豆腐时这份最好点。", "Check the trays first; this order is easiest when plain tofu is available."],
+      "maps_query": "Vegetarian food Techno Edge NUS Singapore",
+      "portion_items": {
+        "white-rice": 160,
+        "fdc-172475": 130,
+        "fdc-2709593": 100
+      },
+      "treat_friendly": false,
+      "diets": [
+        "vegan",
+        "vegetarian",
+        "pescatarian"
+      ],
+      "ingredients": [
+        "rice",
+        "tofu",
+        "greens",
+        "oil"
+      ],
+      "ingredients_known": true,
+      "allergens": [
+        "soy"
+      ]
+    },
+    {
+      "id": "nus-ytf",
+      "venue": "utown",
+      "source": "utown",
+      "stall": ["酿豆腐档 · 现场搭配", "Yong tau foo counter · custom order"],
+      "dish": ["清汤酿豆腐米粉", "Clear yong tau foo with bee hoon"],
+      "order": ["米粉清汤，选原味豆腐和青菜，不要炸料，甜酱另放。", "Bee hoon in clear soup with plain tofu and leafy greens. No fried pieces; sweet sauce on the side."],
+      "note": ["选料时能亲手挑，想多夹青菜就在这一步。", "Pick your own pieces from the tray; that’s the moment to grab more greens."],
+      "maps_query": "Yong Tau Foo Flavours UTown Stephen Riady Centre NUS Singapore",
+      "portion_items": {
+        "fdc-172475": 110,
+        "fdc-2709593": 100,
+        "fdc-168914": 130,
+        "fdc-171606": 160
+      },
+      "treat_friendly": false,
+      "diets": [],
+      "ingredients": [
+        "tofu",
+        "rice",
+        "fish",
+        "greens"
+      ],
+      "ingredients_known": false,
+      "allergens": [
+        "fish",
+        "shellfish",
+        "soy",
+        "gluten"
+      ]
+    },
+    {
+      "id": "nus-caifan",
+      "venue": "utown",
+      "source": "utown",
+      "stall": ["杂菜饭档 · 现场搭配", "Mixed rice counter · custom order"],
+      "dish": ["杂菜饭配白鸡、蛋和青菜", "Cai fan with chicken, egg and greens"],
+      "order": ["半饭，白鸡去皮、一份蛋和青菜，不要淋卤汁。有哪样就夹哪样。", "Half rice, skinless chicken, egg and greens, no gravy. Please show me what’s in the trays."],
+      "note": ["指一指当日的菜盘就能点，没上的配菜可以在草稿里换。", "Point to what’s in the trays and swap any unavailable side in your draft."],
+      "maps_query": "Mixed Vegetable Rice Flavours UTown NUS Singapore",
+      "portion_items": {
+        "white-rice": 90,
+        "boiled-chicken": 90,
+        "boiled-egg": 50,
+        "fdc-2709593": 90
+      },
+      "treat_friendly": false,
+      "diets": [],
+      "ingredients": [
+        "rice",
+        "chicken",
+        "egg",
+        "greens",
+        "oil",
+        "ginger"
+      ],
+      "ingredients_known": false,
+      "allergens": [
+        "egg",
+        "soy",
+        "gluten",
+        "sesame"
+      ]
+    },
+    {
+      "id": "nus-banmian",
+      "venue": "utown",
+      "source": "utown",
+      "stall": ["手工面档 · 到档询问", "Handmade noodle counter · ask for this order"],
+      "dish": ["汤板面", "Ban mian soup"],
+      "order": ["板面要汤的，加蛋，不加辣。", "One soup ban mian with egg, no chilli."],
+      "note": ["扁面慢慢吃，碗里的蛋可以留到最后。", "Save the egg for last if you like; the flat noodles are good to start with."],
+      "maps_query": "Ban Mian Flavours UTown NUS Singapore",
+      "portion_items": {
+        "ban-mian": 500
+      },
+      "treat_friendly": false,
+      "diets": [],
+      "ingredients": [
+        "egg",
+        "fish",
+        "greens",
+        "oil"
+      ],
+      "ingredients_known": false,
+      "allergens": [
+        "egg",
+        "gluten",
+        "soy",
+        "fish",
+        "shellfish"
+      ]
+    },
+    {
+      "id": "nus-mutton",
+      "venue": "utownsrc",
+      "source": "biryani",
+      "stall": ["Bismillah 焖饭", "Bismillah Biryani"],
+      "dish": ["羊肉焖香米", "Mutton biryani"],
+      "order": ["羊肉 biryani，酸奶酱放旁边，谢谢。", "One mutton biryani, with the raita on the side, please."],
+      "note": ["香米和羊肉一起焖，开盖先闻得到香料味。", "The spices rise as you lift the lid on rice cooked with mutton."],
+      "maps_query": "Bismillah Biryani Stephen Riady Centre NUS Singapore",
+      "portion_items": {
+        "sgstudy-boneless-mutton-biryani": 459
+      },
+      "treat_friendly": true,
+      "diets": [],
+      "ingredients": [
+        "rice",
+        "ginger",
+        "oil"
+      ],
+      "ingredients_known": false,
+      "allergens": ["milk", "tree_nut"],
+      "closed_evenings": [5, 6]
+    },
+    {
+      "id": "nus-sub",
+      "venue": "utownsrc",
+      "source": "subway",
+      "stall": ["Subway 三明治档", "Subway sandwich counter"],
+      "dish": ["六寸蔬菜潜艇堡", "Six-inch Veggie Delite"],
+      "order": ["六寸多谷蔬菜堡，生菜番茄黄瓜青椒洋葱，不加酱、不加芝士。", "Six-inch multigrain Veggie Delite with lettuce, tomato, cucumber, peppers and onion. No sauce or cheese."],
+      "note": ["想带回宿舍吃，这一份拿在手里就行；用通用全麦蔬菜堡估算。", "Easy to carry back to hall. The nutrition estimate uses a generic wheat vegetable sandwich."],
+      "maps_query": "Subway NUS University Town Stephen Riady Centre Singapore",
+      "portion_items": {
+        "fdc-2709134": 154
+      },
+      "treat_friendly": false,
+      "diets": ["vegetarian", "pescatarian"],
+      "ingredients": [
+        "greens",
+        "cucumber",
+        "tomato",
+        "oil"
+      ],
+      "ingredients_known": false,
+      "allergens": [
+        "egg",
+        "milk",
+        "soy",
+        "gluten"
+      ],
+      "checked_allergens": [
+        "egg",
+        "milk",
+        "soy",
+        "gluten",
+        "fish",
+        "shellfish",
+        "peanut",
+        "tree_nut",
+        "sesame",
+        "sulphites"
+      ]
+    },
+    {
+      "id": "lau-fish",
+      "venue": "lau",
+      "source": "lau",
+      "stall": ["福晓鱼汤", "Fu Xiao Fish Soup"],
+      "dish": ["鱼片粗米粉清汤", "Sliced fish bee hoon soup"],
+      "order": ["粗米粉清汤，鱼片不要炸的，不加淡奶。", "Thick bee hoon, clear broth, sliced fish. No fried fish or evaporated milk."],
+      "note": ["鱼片和清汤是一口，粗米粉是另一口。", "It’s easy to alternate a spoonful of clear soup with a bite of thick bee hoon."],
+      "maps_query": "Fu Xiao Fish Soup Lau Pa Sat Singapore",
+      "portion_items": {
+        "fdc-168914": 155,
+        "steamed-fish": 110,
+        "fdc-171606": 160
+      },
+      "treat_friendly": false,
+      "diets": [],
+      "ingredients": [
+        "fish",
+        "rice",
+        "ginger"
+      ],
+      "ingredients_known": false,
+      "allergens": [
+        "fish",
+        "shellfish",
+        "soy",
+        "gluten"
+      ]
+    },
+    {
+      "id": "lau-spinach-tofu",
+      "venue": "lau",
+      "source": "lau",
+      "stall": ["Jin Ho 菜汤档", "Jin Ho Spinach Soup"],
+      "dish": ["菠菜豆腐汤配饭", "Spinach tofu soup with rice"],
+      "order": ["菠菜豆腐汤一碗，配白饭，另外的炸料先不用。", "One spinach tofu soup with a side of white rice, no fried toppings, please."],
+      "note": ["米饭单独盛，想泡进汤里还是分着吃都行。", "Keep the rice on the side or spoon a little into the soup."],
+      "maps_query": "Jin Ho Spinach Soup stall 55 Lau Pa Sat Singapore",
+      "portion_items": {
+        "fdc-172475": 110,
+        "fdc-168463": 100,
+        "white-rice": 150,
+        "fdc-2707132": 160
+      },
+      "treat_friendly": false,
+      "diets": [],
+      "ingredients": [
+        "rice",
+        "tofu",
+        "greens",
+        "fish"
+      ],
+      "ingredients_known": false,
+      "allergens": [
+        "fish",
+        "shellfish",
+        "soy",
+        "gluten"
+      ]
+    },
+    {
+      "id": "lau-soto",
+      "venue": "lau",
+      "source": "lau",
+      "stall": ["Warong Pak Sapari 马来面档", "Warong Pak Sapari"],
+      "dish": ["马来鸡汤面", "Mee soto"],
+      "order": ["来一碗 mee soto，辣椒另外放。", "One mee soto, please, with the chilli on the side."],
+      "note": ["先尝鸡汤，想再辣一点才拌进去。", "Taste the chicken broth first and stir in as much chilli as you like."],
+      "maps_query": "Warong Pak Sapari stall 58 Lau Pa Sat Singapore",
+      "portion_items": {
+        "sgstudy-mee-soto": 281
+      },
+      "treat_friendly": false,
+      "diets": [],
+      "ingredients": ["chicken", "ginger", "oil"],
+      "ingredients_known": false,
+      "allergens": [
+        "fish",
+        "soy",
+        "gluten",
+        "egg",
+        "shellfish"
+      ]
+    },
+    {
+      "id": "lau-duck",
+      "venue": "lau",
+      "source": "lau",
+      "stall": ["Chef Lup 烧腊档", "Chef Lup Roasted Delight"],
+      "dish": ["烧鸭饭配蛋和青菜", "Roast duck rice with egg and greens"],
+      "order": ["烧鸭饭，加蛋加青菜，卤汁另放；今天有烫青菜吗？", "Roast duck rice, add an egg and greens, gravy on the side. Is there blanched veg today?"],
+      "note": ["点餐时先问配菜，烧鸭本身留着皮，口感更丰富。", "Ask which sides are ready; the roast duck comes with its skin."],
+      "maps_query": "Chef Lup Roasted Delight Lau Pa Sat Singapore",
+      "portion_items": {
+        "white-rice": 170,
+        "cofid-18-374": 85,
+        "boiled-egg": 50,
+        "fdc-2709593": 70
+      },
+      "treat_friendly": true,
+      "diets": [],
+      "ingredients": [
+        "rice",
+        "egg",
+        "greens",
+        "oil",
+        "ginger"
+      ],
+      "ingredients_known": false,
+      "allergens": [
+        "egg",
+        "soy",
+        "sesame",
+        "gluten"
+      ]
+    },
+    {
+      "id": "lau-veggie",
+      "venue": "lau",
+      "source": "lau",
+      "stall": ["Maya 素食档 · 现场搭配", "Maya Veggie Delight · custom order"],
+      "dish": ["素豆腐青菜饭", "Rice with plain tofu and leafy greens"],
+      "order": ["想配白饭、原味豆腐和烫青菜，不加蛋奶或酱汁。有这几样吗？", "Could I have plain rice, plain tofu and blanched greens, without egg, dairy or sauce, if available?"],
+      "note": ["原味豆腐能不能单点，问一句比猜菜单方便。", "Ask about plain tofu first; it makes a simple combination with rice and greens."],
+      "maps_query": "Maya Veggie Delight stall 47 Lau Pa Sat Singapore",
+      "portion_items": {
+        "white-rice": 160,
+        "fdc-172475": 130,
+        "fdc-2709593": 100
+      },
+      "treat_friendly": false,
+      "diets": [
+        "vegan",
+        "vegetarian",
+        "pescatarian"
+      ],
+      "ingredients": [
+        "rice",
+        "tofu",
+        "greens",
+        "oil"
+      ],
+      "ingredients_known": true,
+      "allergens": [
+        "soy"
+      ]
+    },
+    {
+      "id": "maxwell-tiantian",
+      "venue": "maxwell",
+      "source": "maxwell",
+      "stall": ["天天海南鸡饭", "Tian Tian Hainanese Chicken Rice"],
+      "dish": ["天天海南鸡饭", "Hainanese chicken rice"],
+      "order": ["海南白鸡饭一份，辣椒和黑酱油放旁边。", "One Hainanese chicken rice. Chilli and dark soy on the side."],
+      "note": ["可以先尝一口鸡油饭，再决定要不要拌辣椒。", "Try the fragrant rice on its own before adding the chilli."],
+      "maps_query": "Tian Tian Hainanese Chicken Rice Maxwell Food Centre Singapore",
+      "portion_items": {
+        "chicken-rice-plate": 380
+      },
+      "treat_friendly": true,
+      "diets": [],
+      "ingredients": [
+        "rice",
+        "chicken",
+        "oil",
+        "ginger",
+        "cucumber"
+      ],
+      "ingredients_known": false,
+      "allergens": [
+        "soy",
+        "gluten",
+        "sesame"
+      ],
+      "closed_evenings": [
+        0
+      ]
+    },
+    {
+      "id": "tiong-pepper",
+      "venue": "tiong",
+      "source": "koh",
+      "stall": ["许兄弟猪杂汤", "Koh Brother Pig’s Organ Soup"],
+      "dish": ["胡椒肉片猪肝汤配饭", "Peppery pork and liver soup with rice"],
+      "order": ["猪杂汤要肉片和猪肝，不要肉丸，白饭一碗。", "Pork soup with sliced pork and liver, no meatballs. A bowl of plain rice, please."],
+      "note": ["汤里有胡椒香，蘸料放在小碟里就好。", "Pepper comes through the broth; keep the chilli dip in its little dish."],
+      "maps_query": "Koh Brother Pig's Organ Soup Tiong Bahru Market Singapore",
+      "portion_items": {
+        "white-rice": 165,
+        "fdc-168233": 60,
+        "fdc-167863": 50,
+        "fdc-2707132": 180
+      },
+      "treat_friendly": false,
+      "diets": [],
+      "ingredients": ["rice", "oil"],
+      "ingredients_known": false,
+      "allergens": [
+        "soy",
+        "gluten",
+        "mustard"
+      ],
+      "closed_evenings": [0, 6]
+    },
+    {
+      "id": "zion-prawn",
+      "venue": "zion",
+      "source": "prawn",
+      "stall": ["知味鲜大虾面", "Zhi Wei Xian Big Prawn Noodle"],
+      "dish": ["大虾汤米粉", "Prawn bee hoon soup"],
+      "order": ["要虾汤米粉，只有虾，不加排骨或猪油渣，辣椒另放。", "Prawn soup bee hoon, prawns only, no ribs or pork crisps. Chilli on the side."],
+      "note": ["虾味在汤里，先喝一口再拌辣椒。", "The prawn flavour is in the broth. Taste a spoonful before adding chilli."],
+      "maps_query": "Zhi Wei Xian Zion Road Big Prawn Noodle Singapore",
+      "portion_items": {
+        "fdc-168914": 180,
+        "fdc-175180": 90,
+        "fdc-2707132": 200
+      },
+      "treat_friendly": false,
+      "diets": [],
+      "ingredients": [
+        "rice",
+        "oil",
+        "fish"
+      ],
+      "ingredients_known": false,
+      "allergens": [
+        "shellfish",
+        "soy",
+        "gluten",
+        "fish"
+      ],
+      "closed_evenings": [
+        0
+      ]
+    },
+    {
+      "id": "zion-kway",
+      "venue": "zion",
+      "source": "zion",
+      "stall": ["锡安路十八号炒粿条", "No.18 Zion Road Fried Kway Teow"],
+      "dish": ["炒粿条配蛤蜊", "Wok-fried char kway teow"],
+      "order": ["炒粿条一份，正常份量，辣椒少一点。", "One regular char kway teow, easy on the chilli."],
+      "note": ["粿条现炒，趁热吃最能闻到锅气。", "Eat it hot while the smoky wok aroma is still there."],
+      "maps_query": "No.18 Zion Road Fried Kway Teow Zion Riverside Food Centre Singapore",
+      "portion_items": {
+        "sgstudy-char-kuay-teow": 362
+      },
+      "treat_friendly": true,
+      "diets": [],
+      "ingredients": [
+        "rice",
+        "oil",
+        "egg",
+        "fish"
+      ],
+      "ingredients_known": false,
+      "allergens": [
+        "egg",
+        "soy",
+        "gluten",
+        "shellfish",
+        "fish"
+      ],
+      "closed_evenings": [
+        1
+      ]
+    },
+    {
+      "id": "chin-claypot",
+      "venue": "chinatown",
+      "source": "claypot",
+      "stall": ["联合本记煲饭", "Lian He Ben Ji Claypot"],
+      "dish": ["砂煲鸡饭", "Claypot chicken rice"],
+      "order": ["鸡肉砂煲饭，不要腊肠，黑酱油另放，可以吗？", "Chicken claypot rice, without sausage, if possible. Dark soy on the side."],
+      "note": ["锅底的饭焦可以最后慢慢刮，等砂煲上桌要留点时间。", "Leave time for the claypot and scrape up the toasted rice at the end."],
+      "maps_query": "Lian He Ben Ji Claypot Chinatown Complex Singapore",
+      "portion_items": {
+        "white-rice": 230,
+        "fdc-172389": 115,
+        "fdc-2710180": 6
+      },
+      "treat_friendly": true,
+      "diets": [],
+      "ingredients": [
+        "rice",
+        "chicken",
+        "oil",
+        "ginger",
+        "fish"
+      ],
+      "ingredients_known": false,
+      "allergens": [
+        "soy",
+        "gluten",
+        "fish",
+        "sesame"
+      ],
+      "closed_evenings": [0, 3]
+    },
+    {
+      "id": "nus-utown-wagyu",
+      "venue": "utownsrc",
+      "source": "utown_wagyu",
+      "stall": ["Waa Cow! 牛肉饭", "Waa Cow! beef bowls"],
+      "dish": ["招牌和牛温泉蛋饭", "Original Wagyu beef and egg bowl"],
+      "order": ["一碗原味和牛饭，不加套餐；牛肉酱另放可以吗？", "One Original Wagyu Beef bowl, no set. Could I have the beef sauce on the side?"],
+      "note": ["戳开温泉蛋拌饭。牛肉用食物库的熟牛排作参考，实际和牛的脂肪会有差异。", "Break the soft egg into the rice. Cooked beef steak is the nutrition reference; the marbling of the actual Wagyu will vary."],
+      "maps_query": "Waa Cow NUS University Town Stephen Riady Centre Singapore",
+      "portion_items": {"white-rice": 175, "fdc-171228": 105, "boiled-egg": 50, "fdc-2707442": 8},
+      "treat_friendly": true,
+      "diets": [],
+      "ingredients": ["rice", "egg", "oil"],
+      "ingredients_known": false,
+      "allergens": ["egg", "soy", "gluten"]
+    }
+  ]
+}

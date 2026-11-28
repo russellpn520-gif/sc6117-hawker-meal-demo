@@ -1,7 +1,7 @@
 import base64
 import binascii
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
@@ -15,14 +15,16 @@ from meal_review import review_meal
 from meal_memory import suggest_corrections, usual_meals_ui
 from label_ui import review_label
 from meals import (
-    SG_TIME, IncompleteMealError, create_pending, discard_pending, get_pending, get_profile, list_meals, list_pending,
+    SG_TIME, IncompleteMealError, MealChangedError, create_pending, discard_pending, get_pending, get_profile,
+    list_meals, list_pending,
     load_foods, make_draft, match_text, save_meal, total_nutrients, update_pending,
 )
-from mobile_ui import apply_mobile_style, coverage_status, day_strip, meal_history, saved_receipt
+from mobile_ui import apply_mobile_style, coverage_status, day_strip, diary_rhythm, meal_history, saved_receipt
 from photo_tasks import start_recognition
 from plan_ui import calendar_for_view, day_summary, profile_form, settings, training_plan
 from planning import day_plan
 from recognition import prepare_photo
+from sample_meal import start_practice
 
 
 ROOT = Path(__file__).resolve().parent
@@ -108,7 +110,11 @@ def wait_for_recognition(key, db_path, api_key):
 
 def review_pending(draft, db_path, public_demo):
     is_label = draft["input"].get("method") == "label"
-    if draft["photo"]:
+    if draft["photo"] and draft["input"].get("sample"):
+        with st.container(horizontal=True, vertical_alignment="center", gap="small"):
+            st.image(draft["photo"], width=88, alt=tr("示例烧鸡、油饭和清汤", "Sample roast chicken, seasoned rice and broth"))
+            st.caption(tr("示例鸡饭 · 剩半碗饭？只调米饭就好。", "Sample chicken rice · Half the rice left? Just adjust the rice."))
+    elif draft["photo"]:
         with st.expander(tr("查看包装标签", "View package label") if is_label else tr("查看这餐的照片", "View meal photo"),
                          expanded=is_label):
             st.image(draft["photo"], width="stretch",
@@ -136,6 +142,10 @@ def review_pending(draft, db_path, public_demo):
             payload, items = confirmed
             try:
                 saved = save_meal(payload, items, db_path=db_path)
+            except MealChangedError:
+                st.session_state.notice = tr("这餐的饮品刚刚有更新。请看一眼份量，再确认记餐。",
+                                             "This meal’s drinks changed. Check the updated portions and confirm.")
+                st.rerun()
             except IncompleteMealError as exc:
                 st.warning(tr(str(exc), "Some foods still need a match. Review them or explicitly save a partial meal."))
                 return
@@ -176,10 +186,44 @@ def draft_label(draft, *, time_only=False):
 
 
 def meal_entry(db_path, public_demo):
-    capture_meal(db_path, public_demo)
+    if not st.session_state.get("practice_mode"):
+        capture_meal(db_path, public_demo)
+        if st.button(tr("没带饭？用示例鸡饭试走一遍（免码）", "Try with a sample chicken rice photo (no code needed)"),
+                     key="sample_chicken", width="stretch"):
+            _, key = start_practice(db_path, datetime.now(SG_TIME).date(), restart=True)
+            _switch_practice(True, key)
     with st.expander(tr("按菜名记餐", "Log by food name")):
         text_entry(db_path)
     usual_meals_ui(db_path)
+
+
+def _switch_practice(enabled, draft_id=None):
+    st.session_state.section = "记餐"
+    for key in ("active_draft", "receipt", "mituan_state", "edit_profile", "edit_training_setup",
+                "training_move_preview", "notice"):
+        st.session_state.pop(key, None)
+    if draft_id:
+        st.session_state.active_draft = draft_id
+    if enabled:
+        st.query_params["practice"] = "1"
+    elif "practice" in st.query_params:
+        del st.query_params["practice"]
+    st.rerun()
+
+
+def next_meal_due(records, now):
+    # A late confirmation can belong to an earlier meal. Old entries only have
+    # a confirmation timestamp, which is the closest available fallback.
+    def meal_time(record):
+        stamp = record["at"]
+        if raw := record["input"].get("captured_at"):
+            try:
+                stamp = datetime.fromisoformat(raw)
+            except (TypeError, ValueError):
+                pass
+        return stamp if stamp.tzinfo else stamp.replace(tzinfo=SG_TIME)
+
+    return bool(records and now - max(map(meal_time, records)) >= timedelta(hours=3))
 
 
 def home(db_path, public_demo, today, profile, plan, eaten, records, partial_count, legacy_count):
@@ -198,11 +242,12 @@ def home(db_path, public_demo, today, profile, plan, eaten, records, partial_cou
             saved_receipt(receipt if just_saved else records[0], just_saved=just_saved)
             if just_saved and receipt["date"] != today.isoformat():
                 st.caption(tr(f"用餐日期 {receipt['date']}", f"Meal date · {receipt['date']}"))
-            if profile:
-                day_strip(today, plan, eaten, len(records), partial_count, legacy_count)
+            day_strip(today, plan, eaten, len(records), partial_count, legacy_count)
             st.button(tr("看晚餐建议", "Plan dinner"), on_click=open_dinner, key="home_dinner",
                       type="primary", width="stretch")
-        with st.expander(tr("记下一餐", "Log the next meal")):
+        now = datetime.now(SG_TIME)
+        next_meal = next_meal_due(records, now)
+        with st.expander(tr("记下一餐", "Log the next meal"), expanded=next_meal):
             meal_entry(db_path, public_demo)
     else:
         with st.container(key="home_before"):
@@ -263,8 +308,11 @@ def main(*, public_demo=False):
         title.title(tr("食阁记餐", "Meal Diary"))
     db_path = cloud_diary() if public_demo else None
     today = datetime.now(SG_TIME).date()
+    practice = st.query_params.get("practice") == "1"
+    st.session_state.practice_mode = practice
+    if practice:
+        db_path, _ = start_practice(db_path, today)
     profile = get_profile(db_path=db_path)
-    coach_entry(today, db_path, public_demo)
     if notice := st.session_state.pop("notice", None):
         st.info(notice)
     if st.session_state.get("edit_profile"):
@@ -275,6 +323,8 @@ def main(*, public_demo=False):
     days = calendar_for_view(profile, today, db_path) if profile else ()
     plan = day_plan(profile, today, days) if profile else None
     section = navigation(bool(profile))
+    if practice:
+        st.caption(tr("示例日记 · 今天的训练与营养目标用于试玩。", "Practice diary · Today's workout and targets are examples."))
     if st.session_state.get("device_storage_blocked"):
         st.info(tr("此浏览器限制了设备存储。请允许网站数据后再拍照，以便重新打开时找回草稿。", "Allow website data in this browser to recover meal drafts after reopening."))
     elif st.session_state.get("draft_backup_limited"):
@@ -288,9 +338,15 @@ def main(*, public_demo=False):
         with st.expander(tr("今日目标明细", "Today's targets")):
             day_summary(profile, today, plan, eaten, partial_count=partial_count, legacy_count=legacy_count)
     else:
+        diary_rhythm(today, db_path=db_path)
         day = st.date_input(tr("用餐日期", "Meal date"), value=today, max_value=today)
-        meal_history(records if day == today else list_meals(day, db_path=db_path), day=day)
-    settings(profile, db_path, public_demo)
+        meal_history(records if day == today else list_meals(day, db_path=db_path), day=day, db_path=db_path)
+    if practice:
+        if st.button(tr("结束试玩，回到我的日记", "Leave practice and return to my diary"), key="leave_practice"):
+            _switch_practice(False)
+    else:
+        settings(profile, db_path, public_demo)
+    coach_entry(today, db_path, public_demo)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,8 @@ from functools import partial
 import streamlit as st
 
 from i18n import food_name, source_name, tr
+from meal_drinks import DRINKS, add_drink, available_drinks
+from nutrition_coach import get_preferences
 from recognition import reviewable_photo
 from meals import allocate_grams, load_foods, portion_items, total_nutrients, update_pending_portion
 
@@ -267,12 +269,51 @@ def _selection_key(view):
     return f"{view}-foods" + tr("", "-en")
 
 
-def _correct_foods(panel, foods, original, view):
+def _add_drink(draft, view, db_path, key):
+    portions = DRINKS[key].portions
+    weights = {food: st.session_state.get(f"{view}-grams-{food}", 0) for food in portions}
+    if any(weight + portions[food] > 3000 for food, weight in weights.items()):
+        st.session_state["drink_limit"] = draft["id"]
+        return
+    add_drink(db_path, draft["id"], key)
+
+
+def _drink_chips(draft, view, db_path):
+    drinks = available_drinks(get_preferences(db_path))
+    if not drinks:
+        return
+    st.caption(tr("水吧 · 顺手加一杯", "Drinks counter · Add a cup"))
+    with st.container(horizontal=True, gap="xsmall", key="hawker_drinks"):
+        for key, drink in drinks.items():
+            added = key in draft.get("quick_drinks", ())
+            st.button(("✓ " if added else "+ ") + tr(*drink.names), key=f"{view}-cup-{key}", disabled=added,
+                      on_click=_add_drink, args=(draft, view, db_path, key))
+    if st.session_state.pop("drink_limit", None) == draft["id"]:
+        st.caption(tr("这杯超出单项可记录的份量，可在「改菜名或餐盘份量」里调整。",
+                      "This cup exceeds the per-item limit. Adjust the serving under Edit foods and serving sizes."))
+
+
+def _correct_foods(panel, foods, original, view, cups=()):
     suggested = original["suggested_grams"]
     with panel:
         query = st.text_input(tr("搜索食物", "Search foods"), placeholder=tr("输入菜名或食材", "Enter a dish or ingredient"), key=f"{view}-search")
         selection_key = _selection_key(view)
         stable = f"{view}-selected-ids"
+        seen_key = f"{view}-cups-seen"
+        if stable in st.session_state:
+            new_cups = [k for k in cups if k in DRINKS and k not in st.session_state.get(seen_key, ())]
+            if new_cups:
+                selected = list(st.session_state.get(selection_key, st.session_state[stable]))
+                for drink in new_cups:
+                    for food, added in DRINKS[drink].portions.items():
+                        weight_key = f"{view}-grams-{food}"
+                        if food not in selected:
+                            selected.append(food)
+                        if weight_key in st.session_state:
+                            st.session_state[weight_key] = min(3000, st.session_state[weight_key] + added)
+                st.session_state[selection_key] = selected
+                st.session_state[stable] = selected
+        st.session_state[seen_key] = list(cups)
         initial = [key for key in st.session_state.get(stable, suggested) if key in foods]
         choices = [*suggested, *initial, *st.session_state.get(selection_key, ())]
         matches = foods.search(query) if query.strip() else original.get("alternatives", [])
@@ -325,6 +366,7 @@ def review_meal(draft, db_path=None):
     repair_area = st.container()
     leftovers = st.expander(tr("有哪样没吃完？", "Any leftovers?"))
     action = st.container()
+    drinks_area = st.container()
     view = prefix
     saved = draft.get("portion_review") or {}
     save_args = (draft["id"], original["method"], db_path) if "captured_at" in draft else None
@@ -348,7 +390,10 @@ def review_meal(draft, db_path=None):
     view, main_decisions = _main_review(repair_area, original, base_view, foods)
     rows = _missing_items(original, foods)
     corrections = st.expander(tr("改菜名或餐盘份量", "Edit foods and serving sizes"), expanded=not rows and not bool(original["suggested_grams"]))
-    weights = _correct_foods(corrections, foods, original, view)
+    weights = _correct_foods(corrections, foods, original, view, draft.get("quick_drinks", ()))
+    if "captured_at" in draft:
+        with drinks_area:
+            _drink_chips(draft, view, db_path)
     # Deselecting a whole-dish replacement reopens that group for review.
     dropped = [d for d in main_decisions if d["food_id"] not in weights]
     if dropped:
