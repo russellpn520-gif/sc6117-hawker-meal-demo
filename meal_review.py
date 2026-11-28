@@ -12,8 +12,11 @@ def _share_label(value):
     return tr(*EATEN_SHARES[value])
 
 
-def _persist_choice(widget_key, draft_id, method, db_path, variant, scope=None, food_id=None):
-    value = st.session_state[widget_key]
+def _persist_choice(widget_key, options, draft_id, method, db_path, variant, scope=None, food_id=None):
+    value = st.session_state.get(widget_key)
+    # A required segmented control can send an empty selection while unmounting.
+    if value not in options:
+        return
     if food_id is None:
         update_pending_portion(draft_id, method, value, db_path=db_path)
     else:
@@ -24,13 +27,17 @@ def _review_choice(label, options, labels, default, key, *, save_args=None):
     # Streamlit serializes selection labels. Carry stable values across UI languages.
     widget_key = key + tr("", "-en")
     previous = key + "-value"
-    if save_args is not None and st.session_state.get(widget_key) != default:
-        st.session_state[widget_key] = default
-    elif widget_key not in st.session_state:
-        st.session_state[widget_key] = st.session_state.get(previous, default)
+    initial = default if save_args else st.session_state.get(previous, default)
+    widget_default = initial
+    if save_args and widget_key in st.session_state and st.session_state[widget_key] != initial:
+        st.session_state[widget_key] = initial
+        widget_default = None
     chosen = st.segmented_control(label, options, format_func=labels.__getitem__,
-                                  required=True, key=widget_key, on_change=_persist_choice if save_args else None,
-                                  args=(widget_key, *save_args) if save_args else ())
+                                  required=True, default=widget_default, key=widget_key,
+                                  on_change=_persist_choice if save_args else None,
+                                  args=(widget_key, options, *save_args) if save_args else ())
+    if chosen not in options:
+        chosen = initial
     st.session_state[previous] = chosen
     return chosen
 

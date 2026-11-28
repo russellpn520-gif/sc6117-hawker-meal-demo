@@ -38,6 +38,10 @@ class PendingPortionsTests(unittest.TestCase):
                 self.assertEqual(control(first, "-eaten-white-rice-en").value, 4)
                 self.assertEqual(control(first, "-eaten-boiled-egg-en").value, 1)
                 control(first, "-eaten-white-rice-en").set_value(3).run()
+                # Streamlit can deserialize a disappearing control as None on mobile.
+                control(first, "-eaten-white-rice-en").set_value(None).run()
+                self.assertFalse(first.exception)
+                self.assertEqual(get_pending(key, db_path=path)["portion_review"]["shares"]["按配料"]["white-rice"], 3)
                 control(first, "ui_language_control").set_value("zh").run()
                 self.assertFalse(first.exception)
                 self.assertEqual(control(first, "-eaten-white-rice").value, 3)
