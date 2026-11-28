@@ -1,7 +1,7 @@
 import unittest
 
 from catalog import load_foods
-from recognition import Dish, MealPhoto, VisibleFood, resolve_photo
+from recognition import Dish, MealPhoto, VisibleFood, resolve_photo, reviewable_photo
 
 
 def item(english, chinese, low, high):
@@ -68,3 +68,51 @@ class PartialPhotoTests(unittest.TestCase):
         rows = draft["input"]["missing_items"]
         self.assertEqual([r["name"] for r in rows], ["不明主食", "不明主菜"])
         self.assertEqual(len({r["key"] for r in rows}), len(rows))
+
+    def test_soup_and_rice_on_a_tray_use_their_own_references(self):
+        tray = Dish(whole=item("Hainanese chicken rice", "海南鸡饭", 600, 920), parts=[
+            item("Steamed Chicken Rice", "鸡饭米饭", 160, 240),
+            item("poached chicken", "白切鸡肉", 100, 150),
+            item("clear soup", "清汤", 160, 240),
+            item("greens with soy sauce and fried shallots", "烫青菜配葱酥酱油", 100, 150),
+        ])
+        cucumber = Dish(whole=item("cucumber slices", "黄瓜片", 15, 35), parts=[])
+        draft = self.scan(tray, cucumber)
+        view = draft["input"]
+        self.assertFalse(draft.get("variants"))
+        self.assertEqual(view["suggested_grams"], {"boiled-chicken": 125, "fdc-2707132": 200, "fdc-2709784": 25})
+        rice, greens, sauce = view["missing_items"]
+        self.assertEqual((rice["low_g"], rice["high_g"]), (160, 240))
+        self.assertEqual(rice["alternatives"], ["white-rice", "fdc-2708407"])
+        self.assertEqual(greens["alternatives"], ["fdc-2709593"])
+        self.assertIn("葱酥酱油", sauce["name"])
+        self.assertFalse(sauce["alternatives"])
+        self.assertEqual(reviewable_photo(draft), draft)
+
+    def test_resume_older_tray_removes_unsafe_weights_and_candidates(self):
+        whole = {"suggested_grams": {"chicken-rice-plate": 760}}
+        parts = {"suggested_grams": {"sgstudy-steamed-chicken-rice": 200, "boiled-chicken": 150, "fdc-2707132": 200},
+                 "portion_ranges": {"sgstudy-steamed-chicken-rice": [150, 250]},
+                 "missing_items": [{"key": "cucumber", "name": "黄瓜片", "alternatives": ["steamed-fish"],
+                                    "low_g": 15, "high_g": 35},
+                                   {"key": "greens", "name": "烫青菜配葱酥酱油", "alternatives": ["steamed-fish"]}]}
+        draft = {"id": "existing", "input": {**whole, "method": "photo"}, "variants": {"整道菜": whole, "按配料": parts}}
+        fixed = reviewable_photo(draft)
+        self.assertEqual(fixed["id"], "existing")
+        self.assertFalse(fixed.get("variants"))
+        view = fixed["input"]
+        self.assertEqual(view["suggested_grams"], {"boiled-chicken": 150, "fdc-2707132": 200})
+        cucumber, greens, sauce, rice = view["missing_items"]
+        self.assertEqual(cucumber["alternatives"], ["fdc-2709784"])
+        self.assertEqual((cucumber["low_g"], cucumber["high_g"]), (15, 35))
+        self.assertEqual(greens["alternatives"], ["fdc-2709593"])
+        self.assertFalse(sauce["alternatives"])
+        self.assertEqual((rice["low_g"], rice["high_g"]), (150, 250))
+        self.assertNotIn("steamed-fish", view["alternatives"])
+        self.assertIs(reviewable_photo(fixed), fixed)
+
+    def test_soup_already_separate_does_not_change_the_weighed_plate(self):
+        plate = Dish(whole=item("Hainanese chicken rice", "海南鸡饭", 320, 380), parts=[])
+        soup = Dish(whole=item("clear broth", "清汤", 150, 210), parts=[])
+        view = self.scan(plate, soup)["input"]
+        self.assertEqual(view["suggested_grams"], {"chicken-rice-plate": 350, "fdc-2707132": 180})

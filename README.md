@@ -9,7 +9,7 @@
 1. **每餐营养**来自 USDA、英国 CoFID、台湾食药署、FAO/INFOODS 西非食物表、新加坡官方与实测数据，以及注明市场的厂商菜单。共 19,115 条，按实际吃下的克数换算。[来源、数量与原表](data/SOURCES.md)
 2. **一天需要多少。** Mifflin–St Jeor 成人静息能量消耗公式（1990）根据年龄、身高、体重和性别系数估算静息代谢。Demo 再结合活动量和训练日程设置每日热量目标。[公式原文](https://pubmed.ncbi.nlm.nih.gov/2305711/) · [项目计算代码](planning.py)
 
-运动档位另参考 Cronometer 和 Polar，蛋白质与活动建议参考新加坡 HealthHub。各项依据和演示用的热量分配比例见下方「个人计划怎么算」。Qwen4-Max 从照片中识别菜品，并根据可见的容器、食物面积、厚度或数量给出粗略克数范围。营养值由程序查表计算。
+运动档位另参考 Cronometer 和 Polar，蛋白质与活动建议参考新加坡 HealthHub。各项依据和演示用的热量分配比例见下方「个人计划怎么算」。OpenAI GPT-5 mini 根据餐食、容器和可见参照物估计食物种类及份量范围。营养值由程序查表计算。
 
 ## 手机访问与协作
 
@@ -28,11 +28,9 @@ uv run streamlit run app.py --server.address 127.0.0.1 --server.port 8617
 
 打开 [本地应用](http://127.0.0.1:8617)。菜名查表、营养换算、记餐和训练改期均可离线运行。单用户日志按新加坡日期存入本机 `.local/meals.sqlite3`，重新打开页面仍能看到当天记录。测试可通过 `TRACK3_DB` 指向独立的 SQLite 文件。
 
-**照片识别**在公开版使用阿里云百炼北京区的 `qwen4-max`。在 iPhone 上点「拍下这餐」或「从相册选」，选定照片后浏览器会压缩图片、保存草稿，并自动提交识别。看到已保存的提示就可以放下手机。模型返回后，饭前拍的餐仍要由本人确认实际吃下的份量，才会计入日记。识别详情保留本次 API 返回的 token 用量。[Qwen4-Max 模型说明](https://www.alibabacloud.com/help/en/model-studio/qwen4-max)
+**照片识别**使用 OpenAI Responses API 和 `gpt-5-mini`。在手机上点「拍下这餐」或「从相册选」，浏览器会压缩照片并保存草稿。首次在公共站点使用识别时，输入组内私下分发的拍照码。服务端向 OpenAI 提交餐食照片和识别指令，关闭响应存储和自动重试。饭后再确认实际吃下的份量，才会计入日记。每餐识别详情显示 API 返回的实际输入、输出和合计 token 数。[模型说明与价格](https://developers.openai.com/api/docs/models/gpt-5-mini)
 
-本机启动前可在环境中设置北京区的 `DASHSCOPE_API_KEY`，使用与公开版相同的识别流程。菜名查表、改份量、记餐和训练改期均消耗 0 个 API token。
-
-本机没有配置百炼时，可继续使用 OpenAI。设置 `OPENAI_API_KEY`，或在 Windows 本机页面保存密钥至当前用户的 Windows 凭据管理器。此模式默认使用 `gpt-5.4-mini`，可用 `TRACK3_MODEL` 另选兼容的 OpenAI 模型。
+本机可在项目目录未跟踪的 `.env` 中设置 `OPENAI_API_KEY`，也支持环境变量。Windows 回环地址下另支持本机凭据管理器。在局域网部署还需设置随机的 `TEAM_PHOTO_CODE`（至少 12 位）。查表、调整份量、确认记餐、训练改期及切换语言均消耗 0 个 API token。
 
 ## Streamlit Community Cloud
 
@@ -40,9 +38,11 @@ uv run streamlit run app.py --server.address 127.0.0.1 --server.port 8617
 
 待确认餐在云端临时 SQLite 中保留压缩照片与识别结果，应用也尝试在本机浏览器备份这些草稿。确认记餐或舍弃草稿后，应用移除对应照片并同步设备备份。已确认的日记保存食物、份量、来源和营养快照。Community Cloud 临时磁盘重置后，已备份的草稿可在原浏览器恢复；已确认日记和个人档案依赖云端临时存储。可在个人设置中清除自己的记录。
 
-维护者在应用的 **Settings → Secrets** 设置顶层 `DASHSCOPE_API_KEY`。访客选定照片后，服务器将压缩照片和识别指令发往百炼北京区。模型调用共用服务端密钥，按对应百炼工作空间的额度和价格结算。更换密钥只需更新 Secrets。将代码推送至部署分支后，同一网址会自动更新。[百炼地域与接入地址](https://www.alibabacloud.com/help/en/model-studio/base-url) · [Streamlit 更新说明](https://docs.streamlit.io/deploy/streamlit-community-cloud/manage-your-app)
+维护者在 **Settings → Secrets** 设置顶层 `OPENAI_API_KEY` 和随机的 `TEAM_PHOTO_CODE`。照片识别使用组内共享的课程额度。拍照码验证通过后，同一浏览器在应用存储保留期间可继续识别；更换拍照码会撤销旧授权。公开二维码只用于打开应用。把更新推送至部署分支后，原网址和二维码会自动载入新版本。[Streamlit Secrets](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management)
 
 ## 一分钟试用
+
+页顶可随时切换「中文 / English」。语言偏好保存在当前浏览器，两种语言共用草稿、日记和训练计划。[English interface](https://sc6117-hawker-meal.streamlit.app/?lang=en)
 
 如果照片只匹配到部分食物，页面会标出已选小计和漏掉的菜名。可以补选匹配项、搜索替代或标明没吃；也可明确选择只记录已有项目。这类记录在日记和当天的余量提示里会标为部分记录。
 

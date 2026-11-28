@@ -94,6 +94,11 @@ class Catalog(dict):
         return None
 
     def photo_match(self, english, chinese):
+        # Prefer a curated exact local name to incidental synonyms in source
+        # tables (including animal and produce names that share a translation).
+        local = self.exact_food(chinese)
+        if local in self.featured:
+            return local
         direct = self.exact_food(english, chinese)
         if direct:
             return direct
@@ -123,6 +128,8 @@ class Catalog(dict):
 
     def photo_suggestions(self, english, chinese):
         """Short, user-confirmed alternatives, without unrelated search hits."""
+        if direct := self.photo_match(english, chinese):
+            return [direct]
         if chinese.strip() in {"酱油汁", "醬油汁"}:
             return ["fdc-2707442", "fdc-2707148"]
         candidates = {}

@@ -112,6 +112,7 @@ def open_db(db_path=None):
         CREATE TABLE IF NOT EXISTS workouts (day TEXT PRIMARY KEY);
         CREATE TABLE IF NOT EXISTS rest_days (day TEXT PRIMARY KEY);
         CREATE TABLE IF NOT EXISTS profile (id INTEGER PRIMARY KEY CHECK(id = 1), data TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS photo_access (id INTEGER PRIMARY KEY CHECK(id = 1), proof TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS pending (
             id TEXT PRIMARY KEY, captured_at TEXT NOT NULL, data TEXT NOT NULL,
             photo BLOB NOT NULL, lease TEXT, lease_until REAL
@@ -362,3 +363,4 @@ def clear_diary(*, db_path=None):
         db.execute("DELETE FROM workouts")
         db.execute("DELETE FROM rest_days")
         db.execute("DELETE FROM profile")
+        db.execute("DELETE FROM photo_access")

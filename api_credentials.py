@@ -2,13 +2,21 @@
 
 import os
 import sys
+from pathlib import Path
+
+from dotenv import dotenv_values
 
 
 WINDOWS_CREDENTIAL = "SC6117/track3-demo/OpenAI"
 
 
+def local_setting(name):
+    configured = os.environ.get(name) or dotenv_values(Path(__file__).with_name(".env"), interpolate=False).get(name)
+    return (configured or "").strip()
+
+
 def read_api_key():
-    key = os.environ.get("OPENAI_API_KEY", "").strip()
+    key = local_setting("OPENAI_API_KEY")
     if key or sys.platform != "win32":
         return key
     from win32ctypes.pywin32 import pywintypes, win32cred

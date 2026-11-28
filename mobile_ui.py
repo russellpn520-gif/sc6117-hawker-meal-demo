@@ -4,7 +4,8 @@ from datetime import datetime
 
 import streamlit as st
 
-from meals import SG_TIME, total_nutrients
+from i18n import tr, food_name
+from meals import SG_TIME, load_foods, total_nutrients
 from planning import span
 
 
@@ -114,10 +115,14 @@ def coverage_status(record):
 def coverage_note(partial_count, legacy_count):
     notes = []
     if partial_count:
-        notes.append(f"{partial_count} 餐部分记录")
+        notes.append(tr(f"{partial_count} 餐部分记录", f"partial meals: {partial_count}"))
     if legacy_count:
-        notes.append(f"{legacy_count} 餐旧记录待核对")
-    return "、".join(notes)
+        notes.append(tr(f"{legacy_count} 餐旧记录待核对", f"older meals to check: {legacy_count}"))
+    return tr("、", "; ").join(notes)
+
+
+def _open_training():
+    st.session_state.section = "训练安排"
 
 
 def day_strip(today, plan, eaten, partial_count=0, legacy_count=0):
@@ -125,80 +130,93 @@ def day_strip(today, plan, eaten, partial_count=0, legacy_count=0):
     low, high = plan.kcal
     kcal = eaten["kcal"]
     if note := coverage_note(partial_count, legacy_count):
-        summary = f"今日已记约 {kcal:.0f} kcal，含 {note}"
+        summary = tr(f"今日已记约 {kcal:.0f} kcal，含 {note}", f"About {kcal:.0f} kcal logged today · {note}")
     elif kcal < low:
         remaining = span((low - kcal, high - kcal))
-        summary = f"今日剩余参考量约 {remaining} kcal"
+        summary = tr(f"今日剩余参考量约 {remaining} kcal", f"Estimated remaining today: {remaining} kcal")
     elif kcal <= high:
-        summary = "今日已在热量参考范围内"
+        summary = tr("今日已在热量参考范围内", "Within today's energy target")
     else:
-        summary = f"今日已记 {kcal:.0f} kcal，参考范围 {span(plan.kcal)} kcal"
+        summary = tr(f"今日已记 {kcal:.0f} kcal，参考范围 {span(plan.kcal)} kcal", f"{kcal:.0f} kcal logged · Target {span(plan.kcal)} kcal")
     with st.container(key="day_strip"):
-        st.markdown(f"**{today.month} 月 {today.day} 日 · {plan.label}**")
-        st.caption(f"{summary} · 蛋白质 {eaten['protein_g']:.1f} / {plan.protein_g} g")
+        st.markdown(tr(f"**{today.month} 月 {today.day} 日 · {plan.label}**", f"**{today:%d %b} · {'Training day' if plan.training else 'Rest day'}**"))
+        st.caption(tr(f"{summary} · 蛋白质 {eaten['protein_g']:.1f} / {plan.protein_g} g", f"{summary} · Protein {eaten['protein_g']:.1f} / {plan.protein_g} g"))
+        st.button(tr("调整训练安排", "Adjust training"), type="tertiary", on_click=_open_training, key="home_training")
 
 
 def saved_receipt(record):
     with st.container(key="saved_receipt"):
         status = coverage_status(record) if record else "complete"
         title, label = {
-            "partial": ("已将选中的食物记入日记", "已选小计"),
-            "legacy_review": ("这餐的旧记录待核对", "已记食物小计"),
-            "complete": ("这餐已记入日记", "这餐"),
+            "partial": (tr("已将选中的食物记入日记", "Selected foods added to diary"), tr("已选小计", "Selected subtotal")),
+            "legacy_review": (tr("这餐的旧记录待核对", "Older entry to review"), tr("已记食物小计", "Logged subtotal")),
+            "complete": (tr("这餐已记入日记", "Meal added to diary"), tr("这餐", "Meal")),
         }[status]
         st.markdown(f"**{title}**")
         if record is None:
             return
         totals = record["totals"]
-        st.write(f"{label}约 {totals['kcal']:.0f} kcal · 蛋白质 {totals['protein_g']:.1f} g")
+        st.write(tr(f"{label}约 {totals['kcal']:.0f} kcal · 蛋白质 {totals['protein_g']:.1f} g", f"{label} · About {totals['kcal']:.0f} kcal · Protein {totals['protein_g']:.1f} g"))
         if status == "partial" and (names := record["input"].get("unmatched_foods")):
-            st.caption("未计入：" + "、".join(names))
+            st.caption(tr("未计入：", "Not counted: ") + tr("、".join(names), ", ".join(record["input"].get("unmatched_foods_en") or names)))
+
+
+def _record_name(item):
+    if st.session_state.get("ui_lang") == "en":
+        food = load_foods().get(item.get("food_id"))
+        if food:
+            return food_name(food)
+        return item.get("source_name") or item["name"]
+    return item["name"]
 
 
 def meal_history(records, day=None):
-    st.subheader(f"{day:%m 月 %d 日}的记录" if day else "今日记录")
+    st.subheader(tr(f"{day:%m 月 %d 日}的记录", f"Diary · {day:%d %b}") if day else tr("今日记录", "Today's diary"))
     if not records:
-        st.caption("确认吃下的份量后，这餐就会出现在这里。")
+        st.caption(tr("确认吃下的份量后，这餐就会出现在这里。", "Confirm a meal to see your food and portions here."))
         return
     total = total_nutrients([record["totals"] for record in records])
     statuses = [coverage_status(record) for record in records]
     note = coverage_note(statuses.count("partial"), statuses.count("legacy_review"))
-    qualifier = f"（含 {note}）" if note else ""
-    st.markdown(f"**{len(records)} 餐 · 约 {total['kcal']:.0f} kcal{qualifier}**")
-    st.caption(f"蛋白质 {total['protein_g']:.1f} g · 碳水 {total['carb_g']:.1f} g · 脂肪 {total['fat_g']:.1f} g")
+    qualifier = tr(f"（含 {note}）", f" ({note})") if note else ""
+    st.markdown(tr(f"**{len(records)} 餐 · 约 {total['kcal']:.0f} kcal{qualifier}**", f"**Meals: {len(records)} · About {total['kcal']:.0f} kcal{qualifier}**"))
+    st.caption(tr(f"蛋白质 {total['protein_g']:.1f} g · 碳水 {total['carb_g']:.1f} g · 脂肪 {total['fat_g']:.1f} g", f"Protein {total['protein_g']:.1f} g · Carbs {total['carb_g']:.1f} g · Fat {total['fat_g']:.1f} g"))
     for record, status in zip(records, statuses):
         items = record["items"]
         if not items:
             continue
-        title = "、".join(item["name"] for item in items[:2])
+        title = tr("、", ", ").join(_record_name(item) for item in items[:2])
         if len(items) > 2:
-            title += f" 等 {len(items)} 项"
+            title += tr(f" 等 {len(items)} 项", f" + {len(items) - 2} more")
         original = record["input"]
         if status == "partial":
-            title += "（部分记录）"
+            title += tr("（部分记录）", " (partial)")
         elif status == "legacy_review":
-            title += "（旧记录待核对）"
+            title += tr("（旧记录待核对）", " (older entry to review)")
         stamp = (datetime.fromisoformat(original["captured_at"]).astimezone(SG_TIME)
                  if original.get("captured_at") else record["at"])
-        with st.expander(f"{stamp:%H:%M}　{title}　·　约 {record['totals']['kcal']:.0f} kcal"):
+        with st.expander(tr(f"{stamp:%H:%M}　{title}　·　约 {record['totals']['kcal']:.0f} kcal", f"{stamp:%H:%M} · {title} · About {record['totals']['kcal']:.0f} kcal")):
             weight = sum(item["confirmed_g"] for item in items)
             served = original.get("served_grams")
             if served:
-                st.write(f"盘中 {sum(served.values())} g · 实际计入 {weight} g")
+                st.write(tr(f"盘中 {sum(served.values())} g · 实际计入 {weight} g", f"Served {sum(served.values())} g · Eaten {weight} g"))
             else:
-                st.write(f"实际计入 {weight} g")
+                st.write(tr(f"实际计入 {weight} g", f"Eaten: {weight} g"))
             for item in items:
-                st.markdown(f"{item['name']} · {item['confirmed_g']} g · "
-                            f"约 {item['nutrients']['kcal']:.0f} kcal　[来源]({item['source_url']})")
+                st.markdown(f"{_record_name(item)} · {item['confirmed_g']} g · "
+                            + tr(f"约 {item['nutrients']['kcal']:.0f} kcal　[来源]", f"About {item['nutrients']['kcal']:.0f} kcal · [Source]")
+                            + f"({item['source_url']})")
             if status == "partial" and original.get("unmatched_foods"):
-                st.caption("尚未计入：" + "、".join(original["unmatched_foods"]))
+                st.caption(tr("尚未计入：", "Not counted: ") + tr("、".join(original["unmatched_foods"]), ", ".join(original.get("unmatched_foods_en") or original["unmatched_foods"])))
             elif status == "legacy_review":
-                st.caption("当时未自动匹配：" + "、".join(original["unmatched_foods"]))
-                st.caption("旧版未保存逐项核对结果，以上为当时记入的食物小计。")
+                st.caption(tr("当时未自动匹配：", "Unmatched items: ") + tr("、".join(original["unmatched_foods"]), ", ".join(original.get("unmatched_foods_en") or original["unmatched_foods"])))
+                st.caption(tr("旧版未保存逐项核对结果，以上为当时记入的食物小计。", "This older entry shows the subtotal of foods that were logged."))
             notes = original.get("uncertain_items", original.get("unmatched", []))
             if notes:
-                st.caption("识别备注：" + "、".join(notes))
+                st.caption(tr("识别备注：", "Photo notes: ") + tr("、".join(notes), ", ".join(original.get("uncertain_items_en") or notes)))
             if usage := original.get("token_usage"):
-                with st.expander("本次识别用量"):
-                    st.caption(f"{original.get('model', '照片识别')} · 输入 {usage['input_tokens']:,} · "
-                               f"输出 {usage['output_tokens']:,} · 合计 {usage['total_tokens']:,} tokens")
+                with st.expander(tr("本次识别用量", "Recognition usage")):
+                    st.caption(tr(f"{original.get('model', '照片识别')} · 输入 {usage['input_tokens']:,} · "
+                                  f"输出 {usage['output_tokens']:,} · 合计 {usage['total_tokens']:,} tokens",
+                                  f"{original.get('model', 'Photo scan')} · Input {usage['input_tokens']:,} · "
+                                  f"Output {usage['output_tokens']:,} · Total {usage['total_tokens']:,} tokens"))
