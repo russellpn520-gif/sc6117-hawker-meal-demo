@@ -6,7 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from meals import (
-    SG_TIME, claim_pending, clear_diary, create_pending, discard_pending, draft_cursor,
+    SG_TIME, IncompleteMealError, claim_pending, clear_diary, create_pending, discard_pending, draft_cursor,
     export_pending, finish_pending, get_pending, list_meals, list_pending, make_draft,
     open_db, restore_pending, save_meal, update_pending,
 )
@@ -22,6 +22,19 @@ class PendingMealTests(unittest.TestCase):
         self.jpeg = b"test compressed meal"
         self.item = {"nutrients": {"kcal": 100, "fat_g": 0, "protein_g": 5, "carb_g": 20}}
         self.assertTrue(create_pending(self.draft, self.jpeg, db_path=self.path))
+
+    def test_incomplete_meal_needs_an_explicit_partial_save(self):
+        draft = get_pending(self.draft["id"], db_path=self.path)
+        draft["input"]["unmatched_foods"] = ["白切鸡肉片"]
+        with self.assertRaises(IncompleteMealError):
+            save_meal(draft, [self.item], db_path=self.path)
+        self.assertIsNotNone(get_pending(draft["id"], db_path=self.path))
+        draft["input"]["partial_record"] = True
+        self.assertTrue(save_meal(draft, [self.item], db_path=self.path))
+        day = datetime.fromisoformat(draft["captured_at"]).date()
+        record, = list_meals(day, db_path=self.path)
+        self.assertEqual(record["input"]["unmatched_foods"], ["白切鸡肉片"])
+        self.assertIs(record["input"]["partial_record"], True)
 
     def test_lock_reopen_and_atomic_capture_day_confirmation(self):
         self.assertFalse(create_pending(self.draft, self.jpeg, db_path=self.path))

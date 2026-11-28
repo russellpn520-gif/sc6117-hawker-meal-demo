@@ -97,6 +97,13 @@ class Catalog(dict):
         direct = self.exact_food(english, chinese)
         if direct:
             return direct
+        # Slicing changes the shape of an identified meat, but not its recipe.
+        # Only reuse a curated equivalent. Preserve cooking, sauces and oil.
+        base = re.sub(r"(肉)[片块丁]$|[（(]切[片块丁][)）]$", r"\1", chinese.strip())
+        if base and base != chinese.strip():
+            key = self.exact_food(base)
+            if key in self.featured:
+                return key
         # Reordered names are fine. A different variety, cooking method or
         # ingredient changes the reference and needs the diner's confirmation.
         query = terms(normalize(english))
@@ -113,6 +120,30 @@ class Catalog(dict):
                     matches.append(key)
                     break
         return min(matches, key=self.priority, default=None)
+
+    def photo_suggestions(self, english, chinese):
+        """Short, user-confirmed alternatives, without unrelated search hits."""
+        if chinese.strip() in {"酱油汁", "醬油汁"}:
+            return ["fdc-2707442", "fdc-2707148"]
+        candidates = {}
+        for name in (chinese, english):
+            query = normalize(name)
+            for key in self.search(query, 12):
+                if self[key].source == "gyg-au":
+                    continue
+                for label in self.labels[key]:
+                    # A candidate name must actually occur in the description;
+                    # overlapping on a common word like "rice" is insufficient.
+                    if len(label) < 2:
+                        continue
+                    if re.search(r"[\u3400-\u9fff]", label):
+                        related = label in query
+                    else:
+                        related = f" {label} " in f" {query} "
+                    if related:
+                        score = len(label) / len(query)
+                        candidates[key] = max(score, candidates.get(key, 0))
+        return sorted(candidates, key=lambda k: (-candidates[k], self.priority(k)))[:3]
 
     def search(self, query, limit=18):
         query = normalize(query)

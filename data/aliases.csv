@@ -1,6 +1,10 @@
 food_id,name,aliases
 chicken-rice-plate,鸡饭（整盘）,海南鸡饭套餐|海南鸡饭整盘|白切鸡饭|海南鸡肉饭|Hainanese chicken rice|Hainan chicken rice|Hainanese chicken rice set|chicken rice plate
-white-rice,白饭,熟米饭|熟白米饭|白米饭|steamed white rice|cooked white rice|plain white rice|white rice cooked|cooked rice
+white-rice,白饭,熟米饭|熟白米饭|白米饭|蒸米饭|蒸白饭|蒸白米饭|steamed rice|steamed white rice|cooked white rice|plain white rice|white rice cooked|cooked rice
+boiled-chicken,水煮鸡,白切鸡肉|白斩鸡|白斩鸡肉|白切鸡片|水煮鸡片|白切雞肉|poached chicken|sliced poached chicken|white cut chicken
+fdc-2708407,加油白米饭（油脂种类未指定）,鸡油饭|鸡油米饭|加油煮的米饭|chicken fat rice
+fdc-2709593,水煮绿叶菜（未加油）,焯青菜|焯水青菜|白灼青菜|焯绿叶菜|水煮绿叶菜|blanched leafy greens|blanched greens|boiled leafy greens
+fdc-2707132,清汤（通用参考）,清汤|清湯|清汤汤底|clear broth|clear soup|plain broth
 fdc-2708555,墨西哥碗（通用参考）,墨西哥碗|墨西哥饭碗|墨西哥卷碗|墨西哥饭|burrito bowl|Mexican rice bowl|Mexican bowl|GYG burrito bowl|Guzman y Gomez burrito bowl|GYG墨西哥碗
 fdc-2708556,牛肉或猪肉墨西哥碗,beef burrito bowl|pork burrito bowl|牛肉碗|牛肉墨西哥碗
 fdc-2708557,牛肉或猪肉墨西哥碗（米饭）,beef burrito bowl with rice|牛肉墨西哥饭碗
@@ -72,6 +76,7 @@ fdc-2709224,香蕉,banana|生香蕉
 fdc-2709215,苹果,apple|鲜苹果
 fdc-2709719,生番茄,tomato|fresh tomato|西红柿
 fdc-2707442,酱油,soy sauce
+fdc-2707148,酱油芡汁,勾芡酱油汁|soy gravy|soy sauce gravy
 fdc-2710375,黑咖啡,brewed coffee|black coffee|无糖黑咖啡
 cofid-19-539,土耳其旋转烤肉（仅肉）,doner kebab meat|döner kebab meat
 sgstudy-char-kuay-teow,炒粿条,char kway teow|炒贵刁

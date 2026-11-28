@@ -14,10 +14,10 @@ from api_credentials import read_api_key, save_windows_key
 from device_diary import cloud_diary
 from meal_review import review_meal
 from meals import (
-    SG_TIME, create_pending, discard_pending, get_pending, get_profile, list_meals, list_pending,
+    SG_TIME, IncompleteMealError, create_pending, discard_pending, get_pending, get_profile, list_meals, list_pending,
     load_foods, make_draft, match_text, save_meal, total_nutrients, update_pending,
 )
-from mobile_ui import apply_mobile_style, day_strip, meal_history, saved_receipt
+from mobile_ui import apply_mobile_style, coverage_status, day_strip, meal_history, saved_receipt
 from photo_tasks import start_recognition
 from plan_ui import calendar_for_view, day_summary, profile_form, settings, training_plan
 from planning import day_plan
@@ -153,9 +153,15 @@ def review_pending(draft, db_path, public_demo):
         confirmed = review_meal(draft)
         if confirmed:
             payload, items = confirmed
-            if save_meal(payload, items, db_path=db_path):
+            try:
+                saved = save_meal(payload, items, db_path=db_path)
+            except IncompleteMealError as exc:
+                st.warning(str(exc))
+                return
+            if saved:
                 st.session_state.receipt = {
                     "totals": total_nutrients([i["nutrients"] for i in items]), "date": draft["captured_at"][:10],
+                    "input": payload["input"],
                 }
             else:
                 st.session_state.notice = "这餐已在另一处处理。"
@@ -169,17 +175,19 @@ def review_pending(draft, db_path, public_demo):
 
 def draft_label(draft):
     stamp = datetime.fromisoformat(draft["captured_at"]).astimezone(SG_TIME)
+    if draft["input"].get("unmatched_foods"):
+        return f"{stamp.month}/{stamp.day} {stamp:%H:%M}　有食物待补选"
     keys = draft["input"].get("suggested_grams", {})
     foods = load_foods() if keys else {}
     names = [foods[k].name for k in keys if k in foods][:2]
     return f"{stamp.month}/{stamp.day} {stamp:%H:%M}　" + ("、".join(names) if names else "餐食草稿")
 
 
-def home(db_path, public_demo, today, profile, plan, eaten):
+def home(db_path, public_demo, today, profile, plan, eaten, partial_count, legacy_count):
     pending = list_pending(db_path=db_path)
     if receipt := st.session_state.get("receipt"):
         current = receipt["date"] == today.isoformat()
-        saved_receipt(receipt, plan if current else None, eaten)
+        saved_receipt(receipt)
         if not current:
             st.caption(f"用餐日期 {receipt['date']}")
     if pending:
@@ -203,7 +211,7 @@ def home(db_path, public_demo, today, profile, plan, eaten):
         with st.expander("按菜名记餐"):
             text_entry(db_path)
     if profile:
-        day_strip(today, plan, eaten)
+        day_strip(today, plan, eaten, partial_count=partial_count, legacy_count=legacy_count)
     elif st.button("建立个人计划", width="stretch"):
         st.session_state.edit_profile = True
         st.rerun()
@@ -232,12 +240,14 @@ def main(*, public_demo=False):
         st.info("此浏览器限制了设备存储。请允许网站数据后再拍照，以便重新打开时找回草稿。")
     elif st.session_state.get("draft_backup_limited"):
         st.caption("浏览器的备份空间不足。先确认已有草稿可腾出空间。")
+    statuses = [coverage_status(record) for record in records]
+    partial_count, legacy_count = statuses.count("partial"), statuses.count("legacy_review")
     if section == "记餐":
-        home(db_path, public_demo, today, profile, plan, eaten)
+        home(db_path, public_demo, today, profile, plan, eaten, partial_count, legacy_count)
     elif section == "训练安排":
         training_plan(profile, today, days, db_path)
         with st.expander("今日目标明细"):
-            day_summary(profile, today, plan, eaten)
+            day_summary(profile, today, plan, eaten, partial_count=partial_count, legacy_count=legacy_count)
     else:
         day = st.date_input("用餐日期", value=today, max_value=today)
         meal_history(records if day == today else list_meals(day, db_path=db_path), day=day)

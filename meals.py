@@ -252,9 +252,17 @@ def restore_pending(rows, *, db_path):
         db.execute("UPDATE draft_sync SET hydrated = 1")
 
 
+class IncompleteMealError(ValueError):
+    """The caller must resolve missing foods or explicitly save a partial meal."""
+
+
 def save_meal(draft, items, *, db_path=None):
     if not items:
         raise ValueError("请至少选一项食物。")
+    meal_input = draft["input"]
+    missing = meal_input.get("unmatched_foods") or meal_input.get("missing_items")
+    if missing and meal_input.get("partial_record") is not True:
+        raise IncompleteMealError("这餐还有食物未计入，请补选或选择仅记录已选食物。")
     now = datetime.now(SG_TIME)
     sums = total_nutrients([item["nutrients"] for item in items])
     with closing(open_db(db_path)) as db, db:

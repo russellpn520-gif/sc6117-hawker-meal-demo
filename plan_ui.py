@@ -67,18 +67,27 @@ def profile_form(profile, today, db_path, public_demo):
         st.rerun()
 
 
-def day_summary(profile, today, plan, eaten):
+def day_summary(profile, today, plan, eaten, *, partial_count=0, legacy_count=0):
     nickname = re.sub(r"([\\`*_{}\[\]()<>#!|~$])", r"\\\1", profile.nickname)
     name = (nickname + "的") if nickname else ""
     st.subheader(f"{name}今日计划")
     tier = ACTIVITIES[profile.activity]
     st.caption(f"{today:%m 月 %d 日} · {plan.label} · {GOALS[profile.goal] if profile.goal_factor != 1 else GOALS['maintain']}")
-    label, value = calorie_balance(plan.kcal, eaten["kcal"])
+    incomplete = partial_count or legacy_count
+    label, value = (("已记热量小计", f"{eaten['kcal']:.0f} kcal") if incomplete
+                    else calorie_balance(plan.kcal, eaten["kcal"]))
     with st.container(key="daily_balance"):
         a, b = st.columns(2)
         a.metric(label, value)
         remaining = plan.protein_g - eaten["protein_g"]
-        b.metric("蛋白质还差" if remaining > 0 else "蛋白质", f"{remaining:.1f} g" if remaining > 0 else "已达目标")
+        if incomplete:
+            b.metric("已记蛋白质小计", f"{eaten['protein_g']:.1f} g")
+        else:
+            b.metric("蛋白质还差" if remaining > 0 else "蛋白质", f"{remaining:.1f} g" if remaining > 0 else "已达目标")
+    if partial_count:
+        st.caption(f"今天有 {partial_count} 笔只计入了部分食物。")
+    if legacy_count:
+        st.caption(f"有 {legacy_count} 笔旧记录曾有食物未匹配，完整性待核对。")
     st.write(f"已记 **{eaten['kcal']:.0f} kcal** / 今日目标 **{span(plan.kcal)} kcal**")
     st.caption(f"静息代谢约 {span(profile.resting_kcal)} kcal/天 · 每日蛋白质目标 {plan.protein_g} g")
     st.write(tier.advice if plan.training else tier.recovery)

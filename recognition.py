@@ -24,7 +24,7 @@ class Dish(BaseModel):
 class MealPhoto(BaseModel):
     dishes: list[Dish] = Field(description="One entry per separate dish or side")
     uncertain_items: list[str] = Field(description="Unidentified items or material uncertainties, in Chinese")
-    portion_note: str = Field(description="One short Chinese sentence describing visible size cues and limits")
+    portion_note: str = Field(description="用一句自然中文说明照片中的大小参照及估量限制。")
 
 
 def portion_guess(food, seen):
@@ -47,11 +47,37 @@ def match_visible(seen, foods):
     return None
 
 
+def missing_item(key, seen, foods, exclude=()):
+    low, high = seen.low_g, seen.high_g
+    if not 0 < low <= high <= 3000:
+        low = high = 0
+    return {"key": key, "name": seen.chinese or seen.english or "未辨认食物",
+            "alternatives": [k for k in foods.photo_suggestions(seen.english, seen.chinese) if k not in exclude],
+            "low_g": low, "high_g": high, "replace_food_ids": []}
+
+
+def component_gap(whole, parts):
+    """Check if even the highest ingredient estimates leave the dish uncovered."""
+    if 0 < whole.low_g <= whole.high_g <= 3000 and all(0 < p.low_g <= p.high_g <= 3000 for _, p in parts):
+        return sum(p.high_g for _, p in parts) < whole.low_g
+    # With just a single topping and no scale we cannot establish coverage.
+    return len(parts) == 1
+
+
 def resolve_photo(result, foods, filename):
     groups = []
     for dish in result.dishes[:20]:
         whole_key = match_visible(dish.whole, foods)
-        parts = [(match_visible(p, foods), p) for p in dish.parts[:25]]
+        parts = []
+        for part in dish.parts[:25]:
+            key = match_visible(part, foods)
+            if key and key == whole_key and len(dish.parts) > 1:
+                # E.g. an English "chicken rice" for the flavoured rice part
+                # must not count the entire chicken plate next to its chicken.
+                english = foods.exact_food(part.english)
+                chinese = foods.exact_food(part.chinese)
+                key = next((k for k in (chinese, english) if k and k != whole_key), None)
+            parts.append((key, part))
         if whole_key == "fdc-2708555":
             part_ids = {key for key, _ in parts}
             has_rice = bool(part_ids & {"white-rice", "fdc-2708408", "fdc-2708414"})
@@ -62,24 +88,26 @@ def resolve_photo(result, foods, filename):
                 recipes = (("2708556", "2708557", "2708558", "2708559") if beef else
                            ("2708560", "2708561", "2708562", "2708563"))
                 whole_key = "fdc-" + recipes[int(has_rice) + 2 * int(has_beans)]
-        whole = [(whole_key, dish.whole)]
-        groups.append((whole, parts))
+        groups.append(((whole_key, dish.whole), parts))
 
     def variant(by_parts):
         grams, ranges, missing = {}, {}, []
-        alternatives = []
-        for whole, parts in groups:
-            items = parts if parts and (by_parts or not whole[0][0]) and any(k for k, _ in parts) else whole
-            for key, seen in items:
+        for index, (whole, parts) in enumerate(groups):
+            using_parts = by_parts and bool(parts)
+            items = parts if using_parts else [whole]
+            exclude = {whole[0]} if using_parts else set()
+            if using_parts and not whole[0]:
+                exclude.update(foods.photo_suggestions(whole[1].english, whole[1].chinese))
+            for subindex, (key, seen) in enumerate(items):
+                item_key = f"d{index}-p{subindex}" if using_parts else f"d{index}"
                 if not key:
-                    missing.append(seen.chinese or seen.english)
-                    alternatives.extend(foods.search(seen.english, 3))
-                    alternatives.extend(foods.search(seen.chinese, 3))
+                    missing.append(missing_item(item_key, seen, foods, exclude))
                     continue
                 amount, bounds = portion_guess(foods[key], seen)
                 sum_g = grams.get(key, 0) + amount
                 if sum_g > 3000:
-                    missing.append(f"{foods[key].name}合计超过 3000 g，请核对份量")
+                    missing.append({"key": item_key, "name": f"{foods[key].name}超出份量范围",
+                                    "alternatives": [], "low_g": 0, "high_g": 0, "replace_food_ids": []})
                     continue
                 if key not in grams:
                     ranges[key] = bounds
@@ -88,15 +116,28 @@ def resolve_photo(result, foods, filename):
                 else:
                     ranges[key] = None
                 grams[key] = sum_g
-        return {"suggested_grams": grams, "portion_ranges": ranges, "alternatives": list(dict.fromkeys(alternatives)),
-                "uncertain_items": list(result.uncertain_items), "unmatched_foods": list(dict.fromkeys(missing)),
-                "unmatched": list(dict.fromkeys(u for u in [*result.uncertain_items, *missing] if u))}
+            same_food = len(parts) == 1 and whole[0] and parts[0][0] == whole[0]
+            if using_parts and not same_food and component_gap(whole[1], parts):
+                # Never suggest adding an entire dish on top of its ingredients.
+                # The separate whole-dish view can replace all components at once.
+                missing.append({"key": f"d{index}-gap", "name": f"{whole[1].chinese or whole[1].english}（未覆盖的配料）",
+                                "alternatives": [], "low_g": 0, "high_g": 0, "replace_food_ids": []})
+        names = list(dict.fromkeys(item["name"] for item in missing))
+        alternatives = list(dict.fromkeys(k for item in missing for k in item["alternatives"]))
+        return {"suggested_grams": grams, "portion_ranges": ranges, "alternatives": alternatives,
+                "uncertain_items": list(result.uncertain_items), "unmatched_foods": names, "missing_items": missing,
+                "unmatched": list(dict.fromkeys(u for u in [*result.uncertain_items, *names] if u))}
 
     whole, parts = variant(False), variant(True)
-    draft = make_draft("photo", filename, whole["suggested_grams"], whole["unmatched"])
-    draft["input"].update(whole, portion_note=result.portion_note)
+    # If the dish has no whole reference, start with the available components.
+    # Retain a separate dish-level choice for correcting the whole by name.
+    prefer_parts = any(key is None and any(k for k, _ in p) for (key, _), p in groups)
+    variants = {"按配料": parts, "整道菜": whole} if prefer_parts else {"整道菜": whole, "按配料": parts}
+    first = next(iter(variants.values()))
+    draft = make_draft("photo", filename, first["suggested_grams"], first["unmatched"])
+    draft["input"].update(first, portion_note=result.portion_note)
     if parts != whole:
-        draft["variants"] = {"整道菜": whole, "按配料": parts}
+        draft["variants"] = variants
     return draft
 
 
@@ -121,6 +162,7 @@ def identify_photo(jpeg, filename, foods, *, api_key=None, use_qwen=False, porti
 
     instructions = (
         "Identify plated foods from ANY cuisine in English and Chinese for a searchable nutrition database. "
+        "Use short, familiar food names such as 蒸米饭 or 白切鸡. Name the main food as well as toppings. "
         "Give a common dish name (e.g. burrito bowl), plus recognizable components separately. Group visible "
         "toppings with their dish. Count a separate side, e.g. chips alongside a bowl, as its own dish, "
         "even in the same container. Exclude the separate side's weight from the main dish. "
@@ -131,7 +173,8 @@ def identify_photo(jpeg, filename, foods, *, api_key=None, use_qwen=False, porti
         "visible component. Use relative area, depth, item counts, the container and any diner-supplied scale. "
         "Widen ranges when scale/depth is unclear. Use 0,0 if there is no defensible estimate. "
         "Estimate what is served, before the diner adjusts how much they ate. Never output nutrient values. "
-        "Do not invent hidden oil/fillings or label weights. Flag material uncertainty concisely in Chinese."
+        "Do not invent hidden oil/fillings or label weights. "
+        "份量说明和待核对项只用自然简短的中文，例如‘可以参考餐盒大小，碗底深度看不清。’"
     )
     if use_qwen:
         model_name = "qwen4-max"
@@ -147,8 +190,7 @@ def identify_photo(jpeg, filename, foods, *, api_key=None, use_qwen=False, porti
     data = base64.b64encode(jpeg).decode("ascii")
     response = reader.invoke([
         ("system", instructions),
-        ("human", [{"type": "text", "text": "Identify the meal and portions. Diner's optional size reference: "
-                                            + (portion_hint[:150] or "none")},
+        ("human", [{"type": "text", "text": "辨认这餐及盘中份量。用户提供的大小参照：" + (portion_hint[:150] or "无")},
                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{data}"}}]),
     ])
     result = response["parsed"]

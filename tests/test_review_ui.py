@@ -3,9 +3,9 @@ import unittest
 from streamlit.testing.v1 import AppTest
 
 
-def review_app(suggested, **extra):
+def review_app(suggested, details=None, **extra):
     draft = {"id": "bowl", "input": {"method": "photo", "description": "test.jpg",
-                                     "suggested_grams": suggested, "unmatched": []}, **extra}
+                                     "suggested_grams": suggested, "unmatched": [], **(details or {})}, **extra}
     script = (
         "import streamlit as st\n"
         "from meal_review import review_meal\n"
@@ -63,3 +63,52 @@ class MealReviewTests(unittest.TestCase):
         self.assertEqual(draft["input"]["portion_mode"], "按配料")
         self.assertEqual({i["food_id"]: i["confirmed_g"] for i in items},
                          {"white-rice": 200, "fdc-2707359": 70, "fdc-2708202": 25})
+
+    def test_only_garnish_matched_requires_explicit_partial_save(self):
+        details = {"unmatched_foods": ["蒸米饭", "白切鸡肉片", "焯青菜", "酱油汁", "清汤"]}
+        app = review_app({"tfda-P0200601": 6}, details)
+        self.assertFalse(app.exception)
+        self.assertIn("5 项未计入", app.warning[0].value)
+        self.assertTrue(any("已选食物小计约 **31 kcal**" in s.value for s in app.markdown))
+        self.assertTrue(next(e for e in app.expander if e.label == "补选未匹配的食物").proto.expanded)
+        self.assertFalse(any(b.label == "全部吃完，确认记餐" for b in app.button))
+        self.assertNotIn("confirmed", app.session_state)
+        app.button(key="meal-bowl-partial-confirm").click().run()
+        saved, items = app.session_state.confirmed
+        self.assertTrue(saved["input"]["partial_record"])
+        self.assertEqual(saved["input"]["unmatched_foods"], details["unmatched_foods"])
+        self.assertEqual(items[0]["confirmed_g"], 6)
+
+    def test_fix_missing_with_photo_weight_and_explicit_omission(self):
+        rice = {"name": "蒸米饭", "key": "rice", "alternatives": ["white-rice"], "low_g": 120, "high_g": 180}
+        soup = {"name": "清汤", "key": "soup", "alternatives": [], "low_g": 0, "high_g": 0}
+        app = review_app({"fdc-2708202": 6}, {"missing_items": [rice, soup], "unmatched": ["蒸米饭", "清汤"]})
+        app.button(key="meal-bowl-rice-add-white-rice").click().run()
+        self.assertFalse(app.exception)
+        self.assertEqual(app.number_input(key="meal-bowl-grams-white-rice").value, 150)
+        self.assertEqual(app.warning[0].value, "还有 1 项未计入 · 清汤")
+        app.button(key="meal-bowl-soup-omit").click().run()
+        self.assertFalse(app.warning)
+        app.button(key="meal-bowl-soup-undo").click().run()
+        self.assertIn("清汤", app.warning[0].value)
+        app.button(key="meal-bowl-soup-omit").click().run()
+        app.button(key="meal-bowl-confirm").click().run()
+        saved, items = app.session_state.confirmed
+        self.assertFalse(saved["input"]["partial_record"])
+        self.assertEqual(saved["input"]["unmatched"], [])
+        self.assertEqual([item["confirmed_g"] for item in items], [6, 150])
+
+    def test_deselecting_resolved_food_restores_guard_and_manual_search_works(self):
+        app = review_app({"fdc-2708202": 6}, {"unmatched": ["陌生主食"]})
+        app.text_input(key="meal-bowl-legacy-0-lookup").set_value("白饭").run()
+        app.button(key="meal-bowl-legacy-0-use").click().run()
+        self.assertFalse(app.exception)
+        self.assertFalse(app.warning)
+        app.multiselect(key="meal-bowl-foods").unselect("white-rice").run()
+        self.assertIn("陌生主食", app.warning[0].value)
+        self.assertFalse(any(b.label == "全部吃完，确认记餐" for b in app.button))
+
+    def test_scale_uncertainty_alone_preserves_one_tap(self):
+        app = review_app({"white-rice": 200}, {"unmatched": ["无比例尺，份量为估计"]})
+        self.assertFalse(app.warning)
+        self.assertEqual(app.button(key="meal-bowl-confirm").label, "全部吃完，确认记餐")
