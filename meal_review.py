@@ -381,7 +381,7 @@ def _correct_foods(panel, foods, original, view, draft, db_path):
                       tr(f"参考份量 {food.serving_g} g", f"Reference serving: {food.serving_g} g"))
             weights[key] = st.number_input(
                 tr(f"{food_name(food)} · 端上来的克数", f"{food_name(food)} · grams served"), min_value=1, max_value=3000, step=1,
-                value="min" if widget_key in st.session_state else (effective.get(key) or suggested.get(key, food.serving_g)),
+                value=effective.get(key) or suggested.get(key, food.serving_g),
                 key=widget_key, help=detail,
                 on_change=_save_weights, args=(draft, view, db_path, [key]),
             )

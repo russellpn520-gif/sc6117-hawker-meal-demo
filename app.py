@@ -113,16 +113,15 @@ def wait_for_recognition(key, db_path, api_key):
 def _discard_review(draft, db_path, *, retake=False):
     if not discard_pending(draft["id"], db_path=db_path):
         st.session_state.notice = tr("这餐已在另一处处理。", "This meal has already been handled.")
-        st.rerun()
+        return
     st.session_state.pop("active_draft", None)
     if retake:
         st.session_state.retaking = True
         st.session_state.capture_mode = "label" if draft["input"]["method"] == "label" else "photo"
         if st.session_state.get("practice_mode"):
-            _switch_practice(False)
+            _switch_practice(False, rerun=False)
     else:
         st.session_state.notice = tr("草稿已移除。", "Draft removed.")
-    st.rerun()
 
 
 def review_pending(draft, db_path, public_demo):
@@ -149,10 +148,11 @@ def review_pending(draft, db_path, public_demo):
                 elif is_label:
                     status_slot.markdown(tr("核对标签和实吃份量", "Check the label and serving"))
             with st.container(horizontal=True, gap="xsmall"):
-                if draft["photo"] and st.button(tr("重拍", "Retake"), key="retake-" + draft["id"]):
-                    _discard_review(draft, db_path, retake=True)
-                if st.button(tr("删除草稿", "Delete draft"), key="discard-" + draft["id"]):
-                    _discard_review(draft, db_path)
+                if draft["photo"]:
+                    st.button(tr("重拍", "Retake"), key="retake-" + draft["id"], on_click=_discard_review,
+                              args=(draft, db_path), kwargs={"retake": True})
+                st.button(tr("删除草稿", "Delete draft"), key="discard-" + draft["id"], on_click=_discard_review,
+                          args=(draft, db_path))
     if status == "queued":
         api_key = photo_api_key(public_demo=public_demo)
         if api_key:
@@ -225,7 +225,7 @@ def meal_entry(db_path, public_demo):
     usual_meals_ui(db_path)
 
 
-def _switch_practice(enabled, draft_id=None):
+def _switch_practice(enabled, draft_id=None, *, rerun=True):
     st.session_state.section = "记餐"
     for key in ("active_draft", "receipt", "mituan_state", "edit_profile", "edit_training_setup",
                 "training_move_preview", "notice"):
@@ -237,7 +237,8 @@ def _switch_practice(enabled, draft_id=None):
         st.query_params["practice"] = "1"
     elif "practice" in st.query_params:
         del st.query_params["practice"]
-    st.rerun()
+    if rerun:
+        st.rerun()
 
 
 def next_meal_due(records, now):

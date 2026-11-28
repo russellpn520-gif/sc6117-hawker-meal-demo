@@ -36,6 +36,10 @@ def test_remove_every_row_undo_and_reopen(tmp_path):
         app = launch()
         app.number_input(key=prefix + "-grams-white-rice").set_value(127).run()
         assert app.button(key=prefix + "-confirm").label == "Confirm portions and log"
+        app.segmented_control(key="ui_language_control").set_value("zh").run()
+        assert app.number_input(key=prefix + "-grams-boiled-egg").value == 55
+        assert app.number_input(key=prefix + "-grams-white-rice").value == 127
+        app.segmented_control(key="ui_language_control").set_value("en").run()
         app.button(key=prefix + "-remove-white-rice").click().run()
         app.button(key=prefix + "-remove-boiled-egg").click().run()
         assert not app.exception and app.button(key=prefix + "-confirm").disabled
