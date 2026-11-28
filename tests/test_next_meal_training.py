@@ -126,9 +126,9 @@ def test_move_persists_theme_and_four_targets_across_week_boundary(tmp_path):
     active = planned_days(p, start, end, db_path=db)
     week = [day_plan(p, start+timedelta(days=i), active) for i in range(7)]
     push, rest, back, _, legs, cardio, _ = week
-    assert legs.kcal == back.kcal and legs.kcal > push.kcal > rest.kcal
-    assert back.protein_g == legs.protein_g >= cardio.protein_g > rest.protein_g
-    assert cardio.carb_g > back.carb_g > push.carb_g > rest.carb_g
+    assert legs.kcal == back.kcal == push.kcal and push.kcal > cardio.kcal > rest.kcal
+    assert back.protein_g == legs.protein_g == cardio.protein_g == rest.protein_g
+    assert back.carb_g == push.carb_g and push.carb_g > cardio.carb_g > rest.carb_g
     assert cardio.fat_g < push.fat_g
     for plan in week:
         assert abs(4*(plan.carb_g+plan.protein_g)+9*plan.fat_g-sum(plan.kcal)/2) <= 2
@@ -140,7 +140,7 @@ def test_move_persists_theme_and_four_targets_across_week_boundary(tmp_path):
         actual = day_plan(p, d, active)
         assert actual == after and before.theme != after.theme
         assert meal_target(actual, EATEN, [ROW]).amounts != meal_target(before, EATEN, [ROW]).amounts
-        assert all(getattr(actual, k) != getattr(before,k) for k in ("kcal","protein_g","carb_g","fat_g"))
+        assert all(getattr(actual, k) != getattr(before,k) for k in ("kcal","carb_g","fat_g"))
     assert training_context(p, destination, db_path=db)["sessions"][0]["theme"] == "pull"
 
 
@@ -200,11 +200,11 @@ def test_moved_workout_releases_original_when_new_calendar_conflicts(tmp_path):
     assert day_plan(p, origin, days).theme == "pull" and day_plan(p, dest, days).theme == "legs"
 
 
-def test_weighted_four_day_week_conserves_energy_and_budget_uses_price_evidence():
+def test_four_day_week_uses_goal_factors_and_budget_uses_price_evidence():
     p = profile()
     active = {MON+timedelta(days=d) for d in p.training.weekdays}
     plans = [day_plan(p, MON+timedelta(days=d), active) for d in range(7)]
-    assert sum(v.kcal[0] for v in plans) == 7 * round(p.resting_kcal[0]*1.5)
+    assert sum(v.kcal[0] for v in plans) == sum(round(p.resting_kcal[0] * 1.5 * factor) for factor in (1.03, .88, 1.03, .88, 1.03, .95, .88))
     target = meal_target(DAILY, EATEN, [ROW], choice="one")
     where = LANDMARKS["nus"]["coords"]
     def ids(cap):

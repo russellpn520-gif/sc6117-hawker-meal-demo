@@ -11,12 +11,13 @@ import streamlit as st
 from photo_access import photo_api_key
 from coach_ui import coach_entry, open_dinner
 from device_diary import cloud_diary
+from health_ui import import_health_link
 from i18n import food_name, language_switch, tr
 from meal_review import review_meal
 from meal_memory import suggest_corrections, usual_meals_ui
 from label_ui import review_label
 from meals import (
-    SG_TIME, IncompleteMealError, MealChangedError, create_pending, discard_pending, get_pending, get_profile,
+    SG_TIME, IncompleteMealError, MealChangedError, create_pending, discard_pending, get_pending, get_profile, get_health,
     has_pending, list_meals, list_pending,
     load_foods, make_draft, match_text, save_meal, total_nutrients, update_pending,
 )
@@ -254,7 +255,7 @@ def next_meal_due(records, now):
     return bool(records and now - max(map(meal_time, records)) >= timedelta(hours=3))
 
 
-def home(db_path, public_demo, today, profile, plan, eaten, records, partial_count, legacy_count):
+def home(db_path, public_demo, today, profile, plan, eaten, records, partial_count, legacy_count, health=None):
     pending = list_pending(db_path=db_path)
     if st.session_state.get("retaking"):
         st.subheader(tr("重新拍这餐", "Retake meal photo"))
@@ -283,7 +284,7 @@ def home(db_path, public_demo, today, profile, plan, eaten, records, partial_cou
             saved_receipt(shown, just_saved=just_saved, number=number)
             if just_saved and receipt["date"] != today.isoformat():
                 st.caption(tr(f"用餐日期 {receipt['date']}", f"Meal date · {receipt['date']}"))
-            day_strip(today, plan, eaten, len(records), partial_count, legacy_count, records)
+            day_strip(today, plan, eaten, len(records), partial_count, legacy_count, records, db_path=db_path, health=health)
             st.button(tr("下一顿吃什么", "Plan next meal"), on_click=open_dinner, key="home_dinner",
                       type="primary", width="stretch")
         now = datetime.now(SG_TIME)
@@ -294,9 +295,7 @@ def home(db_path, public_demo, today, profile, plan, eaten, records, partial_cou
         with st.container(key="home_before"):
             st.subheader(tr("记录一餐", "Log a meal"))
             meal_entry(db_path, public_demo)
-        if profile:
-            with st.expander(tr("今天的目标", "Today's targets")):
-                day_strip(today, plan, eaten, 0)
+        day_strip(today, plan, eaten, 0, db_path=db_path, health=health)
     if not profile and st.button(tr("建立个人计划", "Create a personal plan"), width="stretch"):
         st.session_state.edit_profile = True
         st.rerun()
@@ -364,6 +363,8 @@ def main(*, public_demo=False):
             del st.query_params["practice"]
     if practice:
         db_path, _ = start_practice(db_path, today)
+    import_health_link(today, db_path)
+    health = get_health(today, db_path=db_path)
     profile = get_profile(db_path=db_path)
     if notice := st.session_state.pop("notice", None):
         if st.session_state.get("section") == "训练安排":
@@ -376,7 +377,7 @@ def main(*, public_demo=False):
     records = list_meals(today, db_path=db_path)
     eaten = total_nutrients([r["totals"] for r in records])
     days = calendar_for_view(profile, today, db_path) if profile else ()
-    plan = day_plan(profile, today, days) if profile else None
+    plan = day_plan(profile, today, days, active_kcal=health.active_kcal if health else None) if profile else None
     section = navigation(bool(profile))
     if practice:
         st.caption(tr("示例日记 · 今天的训练与营养目标用于试玩。", "Practice diary · Today's workout and targets are examples."))
@@ -387,7 +388,7 @@ def main(*, public_demo=False):
     statuses = [coverage_status(record) for record in records]
     partial_count, legacy_count = statuses.count("partial"), statuses.count("legacy_review")
     if section == "记餐":
-        home(db_path, public_demo, today, profile, plan, eaten, records, partial_count, legacy_count)
+        home(db_path, public_demo, today, profile, plan, eaten, records, partial_count, legacy_count, health)
     elif section == "训练安排":
         training_plan(profile, today, days, db_path, eaten=eaten, incomplete=bool(partial_count or legacy_count))
     else:

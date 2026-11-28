@@ -7,10 +7,11 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from meals import diary_day_plan, diary_move_targets
 from meals import (coverage_status, get_profile, list_meals, list_meals_between, move_workout,
                    open_db, planned_days, total_nutrients)
 from meal_targets import meal_target
-from planning import THEMES, day_plan, move_targets, span, valid_training_move
+from planning import THEMES, span, valid_training_move
 from training_coach import already_logged, training_reply
 
 
@@ -96,7 +97,7 @@ def _today_values(profile, today, db_path):
     rows = list_meals(today, db_path=db_path)
     eaten = total_nutrients([r["totals"] for r in rows])
     partial = any(coverage_status(r) != "complete" for r in rows)
-    plan = day_plan(profile, today, _calendar(profile, today, today, db_path)) if profile else None
+    plan = diary_day_plan(profile, today, _calendar(profile, today, today, db_path), db_path) if profile else None
     return rows, eaten, partial, plan
 
 
@@ -117,7 +118,7 @@ def _diary_text(profile, today, db_path, en, period):
             elif any(coverage_status(r) != "complete" for r in day_rows):
                 text += " (partial)" if en else "（部分记录）"
             if profile and day >= profile.start:
-                target = day_plan(profile, day, days)
+                target = diary_day_plan(profile, day, days, db_path)
                 text += (" · target " if en else " · 目标 ") + span(target.kcal) + f" kcal / {target.protein_g} g"
             lines.append(f"- {day:%m/%d} · {text}")
         return "\n".join(lines)
@@ -154,7 +155,7 @@ def _move_preview(profile, origin, destination, today, db_path, en):
     if logged or a not in active or b in active or not valid_training_move(profile, a, b, active - {a}):
         return ("This move does not fit the calendar, existing workout logs or your training constraints. Choose another workout and an available rest day."
                 if en else "这次改期与现有日程、训练日志或可训练日条件冲突。请选已安排的训练和另一个可用休息日。"), None, None
-    targets = move_targets(profile, a, b, active)
+    targets = diary_move_targets(profile, a, b, active, db_path)
     lines = [f"{a:%m/%d} → {b:%m/%d} · " + ("Proposed move" if en else "改期预览")]
     for day, (old, new) in zip((a, b), targets):
         lines.append(f"- {day:%m/%d} · {span(old.kcal)} → {span(new.kcal)} kcal · " +

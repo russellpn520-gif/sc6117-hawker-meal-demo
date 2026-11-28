@@ -7,9 +7,9 @@ import streamlit as st
 
 from device_diary import forget_diary, remember_diary
 from i18n import tr
-from meals import clear_diary, move_workout, planned_days, save_profile
+from meals import clear_diary, diary_day_plan, diary_move_targets, move_workout, planned_days, save_profile
 from planning import (ACTIVITIES, CARDIO, GOALS, SEXES, THEMES, Profile, TrainingPreferences,
-                      day_plan, move_targets, span, training_theme, valid_training_move)
+                      span, training_theme, valid_training_move)
 from training_coach import (DAYS, EXERCISES, WEIGHTED, read_logs, save_training_log, save_training_preferences,
                             session_lines, session_for_day)
 
@@ -43,7 +43,7 @@ ACTIVITY_EN = {
         "Follow your coach’s recovery session and adjust the schedule to your current training cycle.",
     ),
 }
-GOAL_EN = {"maintain": "Maintain weight", "lose": "Gradual weight loss", "gain": "Gradual weight gain"}
+GOAL_EN = {"lose": "Fat loss", "gain": "Muscle gain", "recomp": "Fat loss + muscle gain"}
 def plan_label(plan):
     return tr(*THEMES[plan.theme if plan.training else "rest"])
 
@@ -92,8 +92,8 @@ def profile_form(profile, today, db_path, public_demo):
                                    help=tr("选择后显示单一估值，留空会显示两种公式的估算范围。",
                                            "Choose one for a single estimate, or leave blank to see a range."))
         goal_labels = {key: goal_label(key) for key in GOALS}
-        goal = st.selectbox(tr("体重目标", "Weight goal"), list(GOALS),
-                            index=list(GOALS).index(profile.goal) if profile else 0,
+        goal = st.selectbox(tr("体态目标", "Body goal"), list(GOALS),
+                            index=list(GOALS).index(profile.goal if profile else "recomp"),
                             format_func=goal_labels.__getitem__, key="plan_goal")
         remember = False
         if public_demo and st.session_state.get("diary_token"):
@@ -137,8 +137,8 @@ def profile_form(profile, today, db_path, public_demo):
         st.rerun()
 
 
-def _preview_date(profile, origin, destination, days, diary):
-    targets = move_targets(profile, origin, destination, days)
+def _preview_date(profile, origin, destination, days, diary, db_path):
+    targets = diary_move_targets(profile, origin, destination, days, db_path)
     st.session_state.training_move_preview = (diary, origin, destination, targets)
     st.rerun()
 
@@ -149,16 +149,18 @@ def _review_date(profile, origin, destination, targets, db_path):
         change = span(sorted(abs(a - b) for a, b in zip(after.kcal, before.kcal)))
         delta = (tr(f"增加 {change}", f"up {change}") if after.training
                  else tr(f"减少 {change}", f"down {change}"))
+        if after.kcal == before.kcal:
+            delta = tr("变化 0", "change 0")
         lines.append(f"**{month_day(day)} · {plan_label(after)}**  \n"
                      f"{span(before.kcal)} → **{span(after.kcal)} kcal** ({delta} kcal)　" +
-                     tr(f"蛋白 {before.protein_g} → {after.protein_g} · 碳水 {before.carb_g} → {after.carb_g} · 脂肪 {before.fat_g} → {after.fat_g} g",
-                        f"Protein {before.protein_g} → {after.protein_g} · Carbs {before.carb_g} → {after.carb_g} · Fat {before.fat_g} → {after.fat_g} g"))
+                     tr(f"蛋白 {before.protein_g} → {after.protein_g} · 碳水 {before.carb_g} → {after.carb_g} · 脂肪 {before.fat_g} → {after.fat_g}\u00a0g",
+                        f"Protein {before.protein_g} → {after.protein_g} · Carbs {before.carb_g} → {after.carb_g} · Fat {before.fat_g} → {after.fat_g}\u00a0g"))
     comparison = "\n\n".join(lines)
     st.markdown("**" + tr("改期后的每日热量目标", "Daily targets after this move") + "**")
     st.markdown(comparison)
     if profile.week_start(origin) != profile.week_start(destination):
-        st.caption(tr("这次改期跨周，两周内的其他日期也会微调，以保持各周总热量。",
-                      "This move crosses two weeks. Other daily targets in those weeks adjust to keep each weekly total."))
+        st.caption(tr("这次改期跨周，两个日期的目标将按新的训练安排计算。",
+                      "This move crosses two weeks. Both dates will use their new training schedules."))
     elif origin.isocalendar()[:2] != destination.isocalendar()[:2]:
         st.caption(tr("这次训练将移到另一个日历周。", "This workout moves to a different calendar week."))
     if st.button(tr("确认改期", "Confirm new date"), key="confirm_training_move", type="primary", width="stretch"):
@@ -350,17 +352,28 @@ def _move_options(profile, day, today, days, logs):
     return choices
 
 
+def _nutrition_rules():
+    st.markdown(tr("全天静息代谢按成人 Mifflin–St Jeor 公式估算。平时乘活动系数；同步后改用全天静息代谢加已同步活动能量。性别留空时保留两种估算。",
+                   "We estimate full-day resting energy with Mifflin–St Jeor. The plan uses an activity factor until you sync. After sync it uses resting energy plus recorded activity. Leaving sex blank keeps both estimates.") +
+                " [Mifflin–St Jeor](https://pubmed.ncbi.nlm.nih.gov/2305711/)")
+    st.caption(tr("本演示的目标系数（力量／有氧／休息）为减脂 0.90／0.90／0.80，增肌 1.14／1.14／1.05，重塑 1.03／0.95／0.88。运动员以及选择减脂或重塑的偏瘦用户按维持估算。非偏瘦减脂和重塑目标至少取全天静息代谢，女性至少 1200、男性至少 1500 kcal。",
+                  "Demo factors for strength / cardio / rest are 0.90 / 0.90 / 0.80 for fat loss, 1.14 / 1.14 / 1.05 for muscle gain and 1.03 / 0.95 / 0.88 for recomposition. Athletes and underweight users choosing fat loss or recomposition use maintenance. For those goals with BMI ≥18.5, targets are at least resting energy and 1200 kcal (female) or 1500 kcal (male)."))
+    st.caption(tr("减脂、增肌、重塑的蛋白参考量分别为 2.0、1.7、2.1 g/kg；久坐且未排力量训练的重塑目标取 1.6。BMI 超过 25 时，用 BMI 25 对应体重加超出部分的 40% 计算。脂肪占 25%，重塑训练日 24%、休息日 30%，下限为每公斤参考体重 0.7 g。其余热量按每克碳水 4 kcal 分配。",
+                  "Protein per reference kg is 2.0 g for fat loss, 1.7 g for muscle gain and 2.1 g for recomposition (1.6 g if inactive without strength sessions). Above BMI 25, reference weight includes 40% of the weight above the BMI-25 threshold. Fat gets 25% of energy, or 24% on recomposition training days and 30% at rest, with a floor of 0.7 g/kg. Remaining energy goes to carbs at 4 kcal/g."))
+
+
 def _training_sources():
+    _nutrition_rules()
     st.write(tr("同一重量下连续两次轻松完成目标，可增加一次重复。漏练后先减轻训练量；连续两次吃力或每第四周安排减量。重量参考你自己的记录。",
                 "After two comfortable completions at the same load, the plan can add one rep. A missed session eases you back in. Two difficult sessions or every fourth week reduce volume. Loads come from your log."))
     st.markdown(tr("力量训练与有氧强度", "Strength and aerobic intensity") +
                 " · [ACSM](https://acsm.org/resistance-training-guidelines-update-2026/) · [CDC](https://www.cdc.gov/physical-activity-basics/measuring/) · [NHS](https://www.nhs.uk/live-well/exercise/strength-exercises/)")
     st.markdown(tr("静息代谢、活动消耗与运动营养", "Resting energy, activity and nutrition") +
-                " · [Mifflin–St Jeor](https://pubmed.ncbi.nlm.nih.gov/2305711/) · [Cronometer](https://support.cronometer.com/hc/en-us/articles/31974307318420-Energy-Expenditure) · [NIH ODS](https://ods.od.nih.gov/factsheets/ExerciseandAthleticPerformance-HealthProfessional/)")
+                " · [Cronometer](https://support.cronometer.com/hc/en-us/articles/31974307318420-Energy-Expenditure) · [NIH ODS](https://ods.od.nih.gov/factsheets/ExerciseandAthleticPerformance-HealthProfessional/)")
 
 
 def _focus_card(profile, today, day, days, logs, diary, db_path, eaten, incomplete):
-    plan = day_plan(profile, day, days)
+    plan = diary_day_plan(profile, day, days, db_path)
     theme = plan.theme if plan.training else "rest"
     tone = "recovery" if theme == "rest" else "cardio" if theme in CARDIO else "strength"
     existing = logs.get(day.isoformat(), {})
@@ -370,12 +383,12 @@ def _focus_card(profile, today, day, days, logs, diary, db_path, eaten, incomple
         title = month_day(day) + (tr(" · 今天", " · Today") if day == today else "")
         badge = escape(_theme_name(theme))
         st.html(f'<div class="focus-heading"><h3>{escape(title)}</h3><span class="focus-badge {tone}">{badge}</span></div>')
-        st.caption(tr(f"参考 {span(plan.kcal)} kcal · 蛋白 {plan.protein_g} g · 碳水 {plan.carb_g} g · 脂肪 {plan.fat_g} g",
-                      f"{span(plan.kcal)} kcal · Protein {plan.protein_g} g · Carbs {plan.carb_g} g · Fat {plan.fat_g} g"))
+        st.caption(tr(f"参考 {span(plan.kcal)} kcal · 蛋白 {plan.protein_g}\u00a0g · 碳水 {plan.carb_g}\u00a0g · 脂肪 {plan.fat_g}\u00a0g",
+                      f"{span(plan.kcal)} kcal · Protein {plan.protein_g}\u00a0g · Carbs {plan.carb_g}\u00a0g · Fat {plan.fat_g}\u00a0g"))
         if day == today and eaten is not None:
             prefix = tr("已记小计", "Logged subtotal") if incomplete else tr("已记", "Logged")
-            st.caption(prefix + tr(f" {eaten['kcal']:.0f} kcal · 蛋白 {eaten['protein_g']:.0f} g · 碳水 {eaten['carb_g']:.0f} g · 脂肪 {eaten['fat_g']:.0f} g",
-                                   f" {eaten['kcal']:.0f} kcal · Protein {eaten['protein_g']:.0f} g · Carbs {eaten['carb_g']:.0f} g · Fat {eaten['fat_g']:.0f} g"))
+            st.caption(prefix + tr(f" {eaten['kcal']:.0f} kcal · 蛋白 {eaten['protein_g']:.0f}\u00a0g · 碳水 {eaten['carb_g']:.0f}\u00a0g · 脂肪 {eaten['fat_g']:.0f}\u00a0g",
+                                   f" {eaten['kcal']:.0f} kcal · Protein {eaten['protein_g']:.0f}\u00a0g · Carbs {eaten['carb_g']:.0f}\u00a0g · Fat {eaten['fat_g']:.0f}\u00a0g"))
         if existing:
             status = {"missed": ("漏练", "Missed"), "comfortable": ("✓ 顺利完成", "✓ Completed comfortably"),
                       "challenging": ("✓ 已打卡 · 体感吃力", "✓ Logged · Challenging")}
@@ -427,7 +440,7 @@ def _focus_card(profile, today, day, days, logs, diary, db_path, eaten, incomple
                     if day not in days:
                         label += " · " + _theme_name(training_theme(profile, origin, days))
                     if st.button(label, key=f"move_option_{candidate}"):
-                        _preview_date(profile, origin, destination, days, diary)
+                        _preview_date(profile, origin, destination, days, diary, db_path)
         elif day in days and day >= today and not existing and not options:
             st.caption(tr("近期暂无符合安排的休息日。", "No available rest day fits this schedule."))
 
@@ -479,28 +492,15 @@ def settings(profile, db_path, public_demo):
     with st.expander(tr("个人设置与估算依据", "Settings and estimates")):
         if profile:
             st.write(f"{activity_label(profile.activity)} · {goal_label(profile.goal)}")
-            if profile.goal != "maintain" and profile.goal_factor == 1:
+            if profile.maintenance_guard:
                 st.caption(tr("按这份身体或训练资料，体验版继续以维持体重估算。",
                               "With your current profile, this demo uses a weight-maintenance estimate."))
             if st.button(tr("修改我的资料和目标", "Edit profile and goals")):
                 st.session_state.edit_profile = True
                 st.rerun()
-            st.markdown(tr("使用成人 Mifflin–St Jeor 公式估算静息代谢，再乘活动系数得到平均每日消耗。"
-                           "默认维持体重，可选目标按均值上调或下调约 5%。选择范围时，两端对应两种公式系数。"
-                           " [公式原文](https://pubmed.ncbi.nlm.nih.gov/2305711/)",
-                           "The Mifflin–St Jeor equation estimates resting energy in adults. An activity factor "
-                           "scales this to average daily needs. The default goal is weight maintenance. "
-                           "Optional weight goals adjust the average by about 5%. A range uses both sex coefficients. "
-                           "[Original study](https://pubmed.ncbi.nlm.nih.gov/2305711/)"))
-            st.markdown(tr("在每周总量内分配热量。力量日和有氧日按训练主题比休息日多分约日均值的 8% 至 10%。",
-                           "Energy is redistributed within each week. Workout days receive about 8–10% of average daily energy more than rest days, depending on the session.") +
-                        " [Cronometer](https://support.cronometer.com/hc/en-us/articles/31974307318420-Energy-Expenditure)")
-            st.markdown(tr("蛋白质基线按体重与日常活动估算。设置分化课表后，力量日参考至少 1.6 g/kg，有氧日至少 1.4 g/kg。"
-                           "热量区间取中点，脂肪约占 26% 至 34%，其余留给碳水。分化比例和每四周减量是本产品的规划规则。",
-                           "Protein starts from body weight and activity level. The split planner uses at least 1.6 g/kg on strength days and 1.4 g/kg on cardio days. "
-                           "At the energy midpoint, fat takes about 26–34% and remaining energy goes to carbs. The session-specific splits and four-week lighter cycle are planning rules.") +
-                        " [NIH ODS](https://ods.od.nih.gov/factsheets/ExerciseandAthleticPerformance-HealthProfessional/)"
-                        " · [DRI](https://www.nationalacademies.org/read/27957/chapter/5)")
+            if profile.goal == "recomp":
+                st.caption(tr("可以从每周安排 2–3 次适合自己的力量练习开始。", "Try scheduling two or three strength sessions a week at a comfortable level."))
+            _nutrition_rules()
         if public_demo:
             if st.session_state.get("device_storage_blocked"):
                 st.caption(tr("浏览器限制了设备存储，本次仅使用当前会话。",

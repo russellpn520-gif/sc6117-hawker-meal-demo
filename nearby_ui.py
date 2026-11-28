@@ -92,8 +92,8 @@ def _show_card(card, request_id, today, db_path):
     with st.container(key=f"hawker_card_{card['id']}", border=True, gap="xsmall"):
         centre, dish, stall, order, note, reason = (escape(tr(*card[k])) for k in ("centre", "dish", "stall", "order", "note", "reason"))
         totals = card["totals"]
-        nutrition = tr(f"约 {totals['kcal']:.0f} kcal · 蛋白质 {totals['protein_g']:.1f} g",
-                       f"About {totals['kcal']:.0f} kcal · {totals['protein_g']:.1f} g protein")
+        nutrition = tr(f"约 {totals['kcal']:.0f} kcal · 蛋白质 {totals['protein_g']:.1f}\u00a0g",
+                       f"About {totals['kcal']:.0f} kcal · {totals['protein_g']:.1f}\u00a0g protein")
         st.html(f'''<div class="hawker-card">
         <p class="hawker-place">{centre} · {_distance(card["distance_m"])}</p>
         <h4>{dish}</h4><p class="hawker-reason">{reason}</p>
@@ -112,11 +112,11 @@ def _show_card(card, request_id, today, db_path):
                         raise
                     st.info(tr("这份搭配已不符合当前偏好或休业安排，请重新选。", "This order no longer fits your preferences or the closure schedule. Choose another."))
         with st.expander(tr("参考份量与来源", "Portions and sources")):
-            st.caption(tr(f"主餐碳水 {totals['carb_g']:.1f} g · 脂肪 {totals['fat_g']:.1f} g",
-                          f"Main · carbs {totals['carb_g']:.1f} g · fat {totals['fat_g']:.1f} g"))
+            st.caption(tr(f"主餐碳水 {totals['carb_g']:.1f}\u00a0g · 脂肪 {totals['fat_g']:.1f}\u00a0g",
+                          f"Main · carbs {totals['carb_g']:.1f}\u00a0g · fat {totals['fat_g']:.1f}\u00a0g"))
             for item in card["items"]:
                 name = food_name(load_foods()[item["food_id"]])
-                st.markdown(f"[{name} · {item['confirmed_g']} g]({item['source_url']})")
+                st.markdown(f"[{name} · {item['confirmed_g']}\u00a0g]({item['source_url']})")
             if card["centre_url"] == card["venue_url"]:
                 st.markdown(f"[{tr('场所与档口资料', 'Venue and stall information')}]({card['centre_url']})")
             else:

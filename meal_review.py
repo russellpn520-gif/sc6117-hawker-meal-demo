@@ -213,7 +213,7 @@ def _repair_controls(panel, view, rows, foods, selected, main_dishes, draft, db_
             st.write(tr(f"补记「{_row_name(row)}」", f"Match: {_row_name(row)}"))
             low, high = row.get("low_g", 0), row.get("high_g", 0)
             if 0 < low <= high <= 3000:
-                st.caption(tr(f"照片估计 {low}–{high} 克，补选后可调整。", f"Estimated {low}–{high} g. You can adjust this after matching."))
+                st.caption(tr(f"照片估计 {low}–{high} 克，补选后可调整。", f"Estimated {low}–{high}\u00a0g. You can adjust this after matching."))
             if row.get("remembered_id") in foods:
                 previous = food_name(foods[row["remembered_id"]])
                 st.caption(tr(f"你曾为这项选过「{previous}」。", f"You previously chose {previous} for this item."))
@@ -341,8 +341,8 @@ def _correct_foods(panel, foods, original, view, draft, db_path):
             food = foods[key]
             widget_key = f"{view}-grams-{key}"
             bounds = ranges.get(key)
-            detail = (tr(f"照片目测约 {bounds[0]}–{bounds[1]} g", f"Estimated {bounds[0]}–{bounds[1]} g from photo") if bounds else
-                      tr(f"参考份量 {food.serving_g} g", f"Reference serving: {food.serving_g} g"))
+            detail = (tr(f"照片目测约 {bounds[0]}–{bounds[1]}\u00a0g", f"Estimated {bounds[0]}–{bounds[1]}\u00a0g from photo") if bounds else
+                      tr(f"参考份量 {food.serving_g}\u00a0g", f"Reference serving: {food.serving_g}\u00a0g"))
             weights[key] = effective[key]
             if widget_key in st.session_state and st.session_state[widget_key] != weights[key]:
                 st.session_state[widget_key] = weights[key]
@@ -454,7 +454,7 @@ def review_meal(draft, db_path=None, status_slot=None):
         for key, served in weights.items():
             name = food_name(foods[key])
             grams = consumed[key]
-            amount = f"{grams} g" if grams == served else tr(f"实吃 {grams}/{served} g", f"Ate {grams}/{served} g")
+            amount = f"{grams}\u00a0g" if grams == served else tr(f"实吃 {grams}/{served}\u00a0g", f"Ate {grams}/{served}\u00a0g")
             with st.container(horizontal=True, vertical_alignment="center", gap="xsmall", key=f"review_row_{key}"):
                 st.markdown(f"{name} · {amount} · " + tr(f"约 {calories.get(key, 0):.0f} kcal", f"~{calories.get(key, 0):.0f} kcal"))
                 st.button("×", key=f"{view}-remove-{key}", help=tr(f"移除{name}", f"Remove {name}"),
@@ -467,8 +467,8 @@ def review_meal(draft, db_path=None, status_slot=None):
                       on_click=_change_row, args=(draft, view, db_path, undo, removed[undo], True))
         if weights:
             label = tr("已选食物小计约", "Selected subtotal: about") if pending else tr("约", "About")
-            st.markdown(tr(f"{label} **{totals['kcal']:.0f} kcal**　·　蛋白质 **{totals['protein_g']:.1f} g**",
-                           f"{label} **{totals['kcal']:.0f} kcal** · Protein **{totals['protein_g']:.1f} g**"))
+            st.markdown(tr(f"{label} **{totals['kcal']:.0f} kcal**　·　蛋白质 **{totals['protein_g']:.1f}\u00a0g**",
+                           f"{label} **{totals['kcal']:.0f} kcal** · Protein **{totals['protein_g']:.1f}\u00a0g**"))
         else:
             st.info(tr("这餐还没有食物。可在下方搜菜补选，或撤销刚才的移除。", "No foods on the plate. Add a food below or undo a removal."))
     row_names = {r["name"] for r in rows}
@@ -495,11 +495,11 @@ def review_meal(draft, db_path=None, status_slot=None):
 
     if items:
         with corrections:
-            st.caption(tr(f"盘中 {sum(weights.values())} g · 实吃 {sum(consumed.values())} g",
-                          f"Served {sum(weights.values())} g · Eaten {sum(consumed.values())} g"))
-            st.write(tr(f"碳水 {totals['carb_g']:.1f} g · 脂肪 {totals['fat_g']:.1f} g", f"Carbs {totals['carb_g']:.1f} g · Fat {totals['fat_g']:.1f} g"))
+            st.caption(tr(f"盘中 {sum(weights.values())}\u00a0g · 实吃 {sum(consumed.values())}\u00a0g",
+                          f"Served {sum(weights.values())}\u00a0g · Eaten {sum(consumed.values())}\u00a0g"))
+            st.write(tr(f"碳水 {totals['carb_g']:.1f}\u00a0g · 脂肪 {totals['fat_g']:.1f}\u00a0g", f"Carbs {totals['carb_g']:.1f}\u00a0g · Fat {totals['fat_g']:.1f}\u00a0g"))
             for item in items:
-                st.markdown(f"{food_name(foods[item['food_id']])} · {item['confirmed_g']} g　"
+                st.markdown(f"{food_name(foods[item['food_id']])} · {item['confirmed_g']}\u00a0g　"
                             f"[{source_name(item['source_label'])}]({item['source_url']})")
             if usage := original.get("token_usage"):
                 st.caption(tr(f"本次识别 · {original.get('model', '')} · 输入 {usage['input_tokens']:,} ＋ "

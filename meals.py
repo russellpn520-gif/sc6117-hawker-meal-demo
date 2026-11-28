@@ -5,6 +5,8 @@ import os
 import re
 import sqlite3
 from contextlib import closing
+from dataclasses import dataclass
+from math import isfinite
 from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
@@ -112,6 +114,10 @@ def open_db(db_path=None):
             input TEXT NOT NULL, items TEXT NOT NULL, totals TEXT NOT NULL, thumbnail BLOB
         );
         CREATE INDEX IF NOT EXISTS meals_by_day ON meals(day);
+        CREATE TABLE IF NOT EXISTS health_sync (
+            day TEXT PRIMARY KEY, active_kcal REAL NOT NULL CHECK(active_kcal BETWEEN 0 AND 5000),
+            steps INTEGER CHECK(steps BETWEEN 0 AND 150000), source TEXT NOT NULL, synced_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS workouts (day TEXT PRIMARY KEY);
         CREATE TABLE IF NOT EXISTS workout_moves (day TEXT PRIMARY KEY, original_day TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS rest_days (day TEXT PRIMARY KEY);
@@ -144,6 +150,58 @@ def open_db(db_path=None):
             if "thumbnail" not in {row[1] for row in db.execute("PRAGMA table_info(meals)")}:
                 db.execute("ALTER TABLE meals ADD COLUMN thumbnail BLOB")
     return db
+
+
+@dataclass(frozen=True)
+class HealthSync:
+    active_kcal: float
+    steps: int | None
+    source: str
+    synced_at: str
+
+
+def sync_health(day, active_kcal, steps, source, *, db_path=None):
+    if type(active_kcal) not in (int, float) or not isfinite(active_kcal) or not 0 <= active_kcal <= 5000:
+        raise ValueError("Invalid active energy")
+    if steps is not None and (type(steps) is not int or not 0 <= steps <= 150000):
+        raise ValueError("Invalid step count")
+    if source not in {"apple_shortcut", "sample_watch"}:
+        raise ValueError("Unknown activity source")
+    with closing(open_db(db_path)) as db, db:
+        db.execute("""INSERT INTO health_sync(day,active_kcal,steps,source,synced_at) VALUES (?,?,?,?,?)
+                      ON CONFLICT(day) DO UPDATE SET active_kcal=excluded.active_kcal,steps=excluded.steps,
+                      source=excluded.source,synced_at=excluded.synced_at""",
+                   (day.isoformat(), active_kcal, steps, source, datetime.now(SG_TIME).isoformat()))
+
+
+def get_health(day, *, db_path=None):
+    with closing(open_db(db_path)) as db:
+        row = db.execute("SELECT active_kcal,steps,source,synced_at FROM health_sync WHERE day=?",
+                         (day.isoformat(),)).fetchone()
+    return HealthSync(*row) if row else None
+
+
+def clear_health(day, *, db_path=None):
+    with closing(open_db(db_path)) as db, db:
+        db.execute("DELETE FROM health_sync WHERE day=?", (day.isoformat(),))
+
+
+def diary_day_plan(profile, day, days, db_path):
+    from planning import day_plan
+    health = get_health(day, db_path=db_path)
+    return day_plan(profile, day, days, active_kcal=health.active_kcal if health else None)
+
+
+def _move_estimates(db, profile, origin, destination, active):
+    from planning import move_targets
+    readings = db.execute("SELECT day,active_kcal FROM health_sync WHERE day IN (?,?)",
+                          (origin.isoformat(), destination.isoformat()))
+    return move_targets(profile, origin, destination, active, {date.fromisoformat(d): kcal for d, kcal in readings})
+
+
+def diary_move_targets(profile, origin, destination, active, db_path):
+    with closing(open_db(db_path)) as db:
+        return _move_estimates(db, profile, origin, destination, active)
 
 
 def _pending_data(draft, photo):
@@ -463,7 +521,7 @@ def planned_days(profile, start, end, *, db_path=None):
 
 
 def move_workout(profile, origin, destination, *, db_path=None, require_current_profile=False, expected_targets=None):
-    from planning import move_targets, valid_training_move
+    from planning import valid_training_move
     from training_coach import already_logged
 
     if origin == destination:
@@ -481,7 +539,7 @@ def move_workout(profile, origin, destination, *, db_path=None, require_current_
             return False
         if already_logged(db, origin) or already_logged(db, destination):
             return False
-        if expected_targets is not None and move_targets(profile, origin, destination, active) != expected_targets:
+        if expected_targets is not None and _move_estimates(db, profile, origin, destination, active) != expected_targets:
             return False
         old, new = (origin.isoformat(),), (destination.isoformat(),)
         previous = db.execute("SELECT original_day FROM workout_moves WHERE day=?", old).fetchone()
@@ -502,6 +560,7 @@ def clear_diary(*, db_path=None):
         db.execute("DELETE FROM pending")
         db.execute("DELETE FROM discarded")
         db.execute("DELETE FROM meals")
+        db.execute("DELETE FROM health_sync")
         db.execute("DELETE FROM workout_moves")
         db.execute("DELETE FROM workouts")
         db.execute("DELETE FROM rest_days")

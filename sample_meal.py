@@ -23,7 +23,7 @@ def start_practice(diary_path, today, *, restart=False):
     if first_visit:
         # Fictional values live only in the practice database. The regular
         # planner schedules today and leaves tomorrow available for a move.
-        save_profile(Profile(age=24, height_cm=168, weight_kg=64, activity="occasional", start=today),
+        save_profile(Profile(age=24, height_cm=168, weight_kg=64, activity="occasional", goal="recomp", start=today),
                      db_path=path)
     if first_visit or restart:
         if prefs := get_preferences(diary_path):

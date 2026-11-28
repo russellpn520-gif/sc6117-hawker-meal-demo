@@ -213,7 +213,7 @@ def _session(profile, day, active, history, lang):
                                   "reps": reps, "kg": load})
     # Budget 3 minutes for the warm-up and 2.5 minutes per set including rest.
     working_minutes = 3 + (5 * sum(ex["sets"] for ex in base["exercises"]) + 1) // 2
-    finish_walk = min(5, prefs.minutes - working_minutes) if profile.goal_factor < 1 and not (lighter or recovering) else 0
+    finish_walk = min(5, prefs.minutes - working_minutes) if profile.goal in {"lose", "recomp"} and not profile.maintenance_guard and not (lighter or recovering) else 0
     if prefs.mode == "mixed" and len(prefs.weekdays) == 1:
         base["aerobic_finish"] = prefs.cardio
         finish_walk = max(1, prefs.minutes - working_minutes)

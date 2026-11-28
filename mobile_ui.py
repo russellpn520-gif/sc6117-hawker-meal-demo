@@ -5,6 +5,7 @@ from html import escape
 
 import streamlit as st
 
+from health_ui import energy_ledger, sync_button
 from i18n import tr, food_name
 from meals import SG_TIME, coverage_status, delete_meal, load_foods, meal_thumbnail, recent_activity, total_nutrients
 from meal_targets import daily_hint, meal_target
@@ -135,7 +136,7 @@ def apply_mobile_style():
         white-space:nowrap;clip-path:inset(50%);}
       [class*="st-key-cal_day_"] button strong {font-size:.95rem;font-variant-numeric:tabular-nums;}
       [class*="st-key-cal_day_"][class*="_today"] button {border-color:var(--meal-ink);}
-      [class*="st-key-cal_day_"][class*="_selected"] button {background:var(--day-tone);color:#101612;}
+      [class*="st-key-cal_day_"][class*="_selected"] button {background:color-mix(in srgb,var(--day-tone) 76%,#14201B);color:#FFFFFF;}
       [class*="st-key-cal_day_"][class*="_strength"],.focus-badge.strength {--day-tone:#D96B38;}
       [class*="st-key-cal_day_"][class*="_cardio"],.focus-badge.cardio {--day-tone:#2E7CF6;}
       [class*="st-key-cal_day_"][class*="_done"] {--day-tone:#1E9B75;}
@@ -143,7 +144,7 @@ def apply_mobile_style():
       .focus-badge.recovery {--day-tone:#8566E3;}
       .focus-heading {display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .65rem;}
       .focus-badge {padding:.25rem .55rem;border-radius:.6rem;font-size:.83rem;font-weight:600;
-        background:color-mix(in srgb,var(--day-tone) 15%,var(--meal-card));border-inline-start:3px solid var(--day-tone);}
+        background:color-mix(in srgb,var(--day-tone) 15%,var(--meal-card));color:color-mix(in srgb,var(--day-tone) 62%,var(--meal-ink));}
       .focus-exercises {list-style:none;margin:0;padding:0 !important;}
       .focus-exercises li {padding:.48rem .25rem;border-top:1px solid var(--meal-edge);font-size:.94rem;line-height:1.4;}
       .st-key-move_choices button {border-radius:1.5rem;min-height:44px;}
@@ -161,6 +162,9 @@ def apply_mobile_style():
         display: flex; align-items: baseline; flex-wrap: wrap; column-gap: .5rem;
         font-variant-numeric: tabular-nums; line-height: 1.35;
       }
+      .meal-meter-line > :not(.meal-label) {white-space:nowrap;}
+      .st-key-health_heading {align-items:center;flex-wrap:nowrap;justify-content:space-between;}
+      .st-key-health_heading .stElementContainer:has(.stButton) {flex:0 0 auto;}
       .meal-meter-line .meal-label {font-size: .88rem; margin-inline-end: auto;}
       .meal-meter-line strong {font-size: 1.18rem; line-height: 1.15;}
       .meal-meter-line small {font-size: .78rem; color: inherit; opacity: .83;}
@@ -252,14 +256,14 @@ def _meter(label, value, unit, current, target, bounds, complete):
             f'<div class="meal-track {tone}" {attrs}><span style="width:{fill:.2f}%"></span></div></div>')
 
 
-def day_strip(today, plan, eaten, meal_count, partial_count=0, legacy_count=0, records=()):
+def day_strip(today, plan, eaten, meal_count, partial_count=0, legacy_count=0, records=(), *, db_path=None, health=None):
     kcal, protein = eaten["kcal"], eaten["protein_g"]
     note = coverage_note(partial_count, legacy_count)
     kcal_target, protein_target = "", ""
     heading = tr("今天已记", "Logged today")
     if plan:
         kcal_target = tr(f"参考 {span(plan.kcal)}", f"Target {span(plan.kcal)}")
-        protein_target = tr(f"目标 {plan.protein_g} g", f"Target {plan.protein_g} g")
+        protein_target = tr(f"目标 {plan.protein_g}\u00a0g", f"Target {plan.protein_g}\u00a0g")
         theme = tr(*THEMES[plan.theme if plan.training else "rest"])
         heading = tr(f"{today.month} 月 {today.day} 日 · {theme}", f"{today:%d %b} · {theme}")
         if not meal_count:
@@ -270,10 +274,13 @@ def day_strip(today, plan, eaten, meal_count, partial_count=0, legacy_count=0, r
     for key, name in (("protein_g", tr("蛋白", "Protein")), ("carb_g", tr("碳水", "Carbs")), ("fat_g", tr("脂肪", "Fat"))):
         amount = eaten.get(key, 0)
         goal = getattr(plan, key, None)
-        macros.append(_meter(name, f"{amount:.0f}", "g", amount, f"/ {goal} g" if goal else "",
+        macros.append(_meter(name, f"{amount:.0f}", "g", amount, f"/ {goal}\u00a0g" if goal else "",
                              (goal, goal) if goal else None, not note))
     with st.container(key="day_strip"):
-        st.markdown(f"**{heading}**")
+        with st.container(horizontal=True, gap="small", key="health_heading"):
+            st.markdown(f"**{heading}**")
+            sync_button(today, db_path, health)
+        energy_ledger(plan, kcal, health, bool(note))
         st.html(f'<div class="meal-meters">{energy_meter}<div class="macro-meters">{"".join(macros)}</div></div>')
         if note:
             st.markdown(tr(f"以上是已记小计，含{note}。", f"Logged subtotal, including {note}."))
@@ -291,9 +298,13 @@ def day_strip(today, plan, eaten, meal_count, partial_count=0, legacy_count=0, r
             st.caption(tr(*daily_hint(plan, eaten, target.veg_gap, datetime.now(SG_TIME).hour)))
         if plan:
             with st.expander(tr("目标明细", "Target details")):
+                if health:
+                    st.caption(tr("穿戴设备的活动能量是估算值，部分设备与活动的误差会超过 20%。",
+                                  "Wearable activity energy is an estimate. Errors can exceed 20% depending on the device and activity.") +
+                               " [Shcherbina et al.](https://doi.org/10.3390/jpm7020003)")
                 if meal_count and not note:
                     left = max(0, plan.protein_g - protein)
-                    st.caption(tr(f"蛋白质还余 {left:.1f} g", f"{left:.1f} g protein left"))
+                    st.caption(tr(f"蛋白质还余 {left:.1f}\u00a0g", f"{left:.1f}\u00a0g protein left"))
                 st.caption(tr("三大营养素按热量区间中点估算，碳水和蛋白每克 4 kcal，脂肪每克 9 kcal。训练日配比是可调整的计划参考。",
                               "Macro estimates use the midpoint of your energy range, at 4/4/9 kcal per gram of carbs, protein and fat. Workout-day splits are planning estimates."))
                 st.markdown("[HPB · My Healthy Plate](https://www.healthhub.sg/well-being-and-lifestyle/food-diet-and-nutrition/plan-your-meals-with-my-healthy-plate) · [DRI · AMDR](https://www.nationalacademies.org/read/27957/chapter/5)")
@@ -338,16 +349,16 @@ def saved_receipt(record, *, just_saved, number=None):
     st.markdown(f"**{title}**")
     names = _meal_names(record.get("items", []))
     totals = record["totals"]
-    values = tr(f"约 {totals['kcal']:.0f} kcal · 蛋白质 {totals['protein_g']:.1f} g",
-                f"About {totals['kcal']:.0f} kcal · {totals['protein_g']:.1f} g protein")
+    values = tr(f"约 {totals['kcal']:.0f} kcal · 蛋白质 {totals['protein_g']:.1f}\u00a0g",
+                f"About {totals['kcal']:.0f} kcal · {totals['protein_g']:.1f}\u00a0g protein")
     adjustment = _adjusted_portion(record["input"]) if just_saved else None
     if adjustment:
         values = tr(f"约 {totals['kcal']:.0f} kcal", f"About {totals['kcal']:.0f} kcal")
     st.text(" · ".join(filter(None, (names, values))))
     if adjustment:
         protein = totals["protein_g"]
-        st.caption(tr(f"{adjustment}，已按实吃份量记好。这餐记入了 {protein:.1f} g 蛋白质。",
-                      f"{adjustment}. Logged as eaten, with {protein:.1f} g of protein recorded for this meal."))
+        st.caption(tr(f"{adjustment}，已按实吃份量记好。这餐记入了 {protein:.1f}\u00a0g 蛋白质。",
+                      f"{adjustment}. Logged as eaten, with {protein:.1f}\u00a0g of protein recorded for this meal."))
     if status == "partial" and (missing := record["input"].get("unmatched_foods")):
         st.caption(tr("未计入：", "Not counted: ") + tr("、".join(missing), ", ".join(record["input"].get("unmatched_foods_en") or missing)))
 
@@ -390,7 +401,7 @@ def meal_history(records, day=None, *, db_path=None):
     note = coverage_note(statuses.count("partial"), statuses.count("legacy_review"))
     qualifier = tr(f"（含 {note}）", f" ({note})") if note else ""
     st.markdown(tr(f"**{len(records)} 餐 · 约 {total['kcal']:.0f} kcal{qualifier}**", f"**Meals: {len(records)} · About {total['kcal']:.0f} kcal{qualifier}**"))
-    st.caption(tr(f"蛋白质 {total['protein_g']:.1f} g · 碳水 {total['carb_g']:.1f} g · 脂肪 {total['fat_g']:.1f} g", f"Protein {total['protein_g']:.1f} g · Carbs {total['carb_g']:.1f} g · Fat {total['fat_g']:.1f} g"))
+    st.caption(tr(f"蛋白质 {total['protein_g']:.1f}\u00a0g · 碳水 {total['carb_g']:.1f}\u00a0g · 脂肪 {total['fat_g']:.1f}\u00a0g", f"Protein {total['protein_g']:.1f}\u00a0g · Carbs {total['carb_g']:.1f}\u00a0g · Fat {total['fat_g']:.1f}\u00a0g"))
     ordered = sorted(zip(records, statuses), key=lambda pair: (meal_time(pair[0]), pair[0]["id"]), reverse=True)
     for index, (record, status) in enumerate(ordered):
         items = record["items"]
@@ -421,11 +432,11 @@ def meal_history(records, day=None, *, db_path=None):
                 weight = sum(item["confirmed_g"] for item in items)
                 served = original.get("served_grams")
                 if served:
-                    st.write(tr(f"盘中 {sum(served.values())} g · 实际计入 {weight} g", f"Served {sum(served.values())} g · Eaten {weight} g"))
+                    st.write(tr(f"盘中 {sum(served.values())}\u00a0g · 实际计入 {weight}\u00a0g", f"Served {sum(served.values())}\u00a0g · Eaten {weight}\u00a0g"))
                 else:
-                    st.write(tr(f"实际计入 {weight} g", f"Eaten: {weight} g"))
+                    st.write(tr(f"实际计入 {weight}\u00a0g", f"Eaten: {weight}\u00a0g"))
                 for item in items:
-                    st.markdown(f"{_record_name(item)} · {item['confirmed_g']} g · "
+                    st.markdown(f"{_record_name(item)} · {item['confirmed_g']}\u00a0g · "
                                 + tr(f"约 {item['nutrients']['kcal']:.0f} kcal　[来源]", f"About {item['nutrients']['kcal']:.0f} kcal · [Source]")
                                 + f"({item['source_url']})")
                 if status == "partial" and original.get("unmatched_foods"):

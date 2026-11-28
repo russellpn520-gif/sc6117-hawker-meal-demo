@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import date, timedelta
 from itertools import combinations
+from math import ceil, isfinite
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -10,27 +11,26 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 class Activity:
     label: str
     pal: float
-    protein_per_kg: float
     training_offsets: tuple[int, ...]
     advice: str
     recovery: str
 
 
 ACTIVITIES = {
-    "inactive": Activity("没有运动习惯 · 通常每周 0 天", 1.20, 0.8, (0,),
+    "inactive": Activity("没有运动习惯 · 通常每周 0 天", 1.20, (0,),
                          "今天可以从饭后舒适步行 10 分钟开始，习惯后再慢慢延长。",
                          "今天按平时节奏活动，有空起身走一走。"),
-    "occasional": Activity("偶尔活动 · 通常每周 1–2 天", 1.375, 1.0, (0, 3),
+    "occasional": Activity("偶尔活动 · 通常每周 1–2 天", 1.375, (0, 3),
                            "今天试试快走 20 分钟，选能说话的步速，时间也可以拆开。",
                            "今天可以轻松散步，给下一次活动留些体力。"),
-    "regular": Activity("经常活动 · 通常每周至少 3 天", 1.50, 1.2, (0, 2, 4),
+    "regular": Activity("经常活动 · 通常每周至少 3 天", 1.50, (0, 2, 4),
                         "今天做一次熟悉的有氧或力量练习。和上次交替，给同一肌群留出恢复时间。",
                         "今天安排恢复，轻松散步即可，下次训练再回到平时的强度。"),
-    "athlete": Activity("专业运动员 · 系统备赛，通常每周超过 12 小时", 1.90, 1.5, (0, 2, 3, 4, 5, 6),
+    "athlete": Activity("专业运动员 · 系统备赛，通常每周超过 12 小时", 1.90, (0, 2, 3, 4, 5, 6),
                         "沿用教练安排的专项训练，把日历对齐实际训练日。高训练量时请与运动营养师核对摄入。",
                         "把今天留给教练计划中的恢复活动，按实际训练周期调整安排。"),
 }
-GOALS = {"maintain": "维持体重", "lose": "温和减脂", "gain": "温和增重"}
+GOALS = {"lose": "减脂", "gain": "增肌", "recomp": "减脂 + 增肌"}
 SEXES = {"female": "女性", "male": "男性"}
 
 
@@ -114,18 +114,28 @@ class Profile(BaseModel):
     weight_kg: float = Field(ge=20, le=400)
     activity: Literal["inactive", "occasional", "regular", "athlete"]
     sex: Literal["female", "male"] | None = None
-    goal: Literal["maintain", "lose", "gain"] = "maintain"
+    goal: Literal["lose", "gain", "recomp"] = "recomp"
     start: date
     training: TrainingPreferences | None = None
     training_history: tuple[TrainingPreferences, ...] = ()
 
+    @field_validator("goal", mode="before")
+    @classmethod
+    def migrate_goal(cls, value):
+        return "recomp" if value == "maintain" else value
+
     @property
-    def goal_factor(self):
-        if self.activity == "athlete":
-            return 1.0
-        if self.goal == "lose" and self.weight_kg / (self.height_cm / 100) ** 2 >= 18.5:
-            return 0.95
-        return 1.05 if self.goal == "gain" else 1.0
+    def bmi(self):
+        return self.weight_kg / (self.height_cm / 100) ** 2
+
+    @property
+    def reference_kg(self):
+        threshold = 25 * (self.height_cm / 100) ** 2
+        return self.weight_kg if self.weight_kg <= threshold else threshold + 0.4 * (self.weight_kg - threshold)
+
+    @property
+    def maintenance_guard(self):
+        return self.activity == "athlete" or (self.bmi < 18.5 and self.goal in {"lose", "recomp"})
 
     @property
     def resting_kcal(self):
@@ -187,41 +197,56 @@ class DayPlan:
     fat_g: int = 0
     theme: str = "general"
     time_slot: str | None = None
+    output_kcal: tuple[int, int] | None = None
+    goal: str = "recomp"
+    maintenance: bool = False
+    bmr: tuple[float, float] | None = None
 
     @property
     def label(self):
         return "训练日" if self.training else "休息日"
 
 
-def day_plan(profile, day, training_days):
-    """Distribute a seven-day maintenance budget without adding exercise twice."""
-    start = profile.week_start(day)
+def energy_factor(profile, theme):
+    if profile.maintenance_guard:
+        return 1.0
+    if profile.goal == "lose":
+        return 0.80 if theme == "rest" else 0.90
+    if profile.goal == "gain":
+        return 1.05 if theme == "rest" else 1.14
+    if theme == "rest":
+        return 0.88
+    return 0.95 if theme in CARDIO else 1.03
+
+
+def day_plan(profile, day, training_days, *, active_kcal=None):
+    """Choose one expenditure baseline. Steps and planned workouts add no extra calories."""
+    if active_kcal is not None and (not isfinite(active_kcal) or not 0 <= active_kcal <= 5000):
+        raise ValueError("Invalid active energy")
     theme = training_theme(profile, day, training_days)
-    training = day in training_days
-    tier = ACTIVITIES[profile.activity]
-    week_themes = [training_theme(profile, d, training_days) for d in training_days
-                   if start <= d < start + timedelta(days=7)]
-    targets = []
-    for resting in profile.resting_kcal:
-        average = round(resting * tier.pal * profile.goal_factor)
-        step = round(average * 0.08 / 7)
-        # Transfer integer energy units between dates, preserving the weekly total.
-        uplift = {t: round(step * 1.25) if t in LARGE or t in CARDIO else step for t in THEMES}
-        uplift["rest"] = 0
-        targets.append(average + 7 * uplift[theme] - sum(uplift[t] for t in week_themes))
-    coefficient = max(tier.protein_per_kg, 1.2 if profile.age >= 50 else 0.8)
-    if profile.training_for(day) and profile.activity == "regular" and profile.goal_factor != 1:
-        # A small demo adjustment for regular strength training during a weight-change goal.
-        coefficient = max(coefficient, 1.3)
-    protein = round(profile.weight_kg * (coefficient + (0.1 if training else 0)))
+    training = theme != "rest"
     prefs = profile.training_for(day)
-    if prefs and prefs.mode and training:
-        protein = round(profile.weight_kg * max(coefficient, 1.4 if theme in CARDIO else 1.6))
+    factor = energy_factor(profile, theme)
+    resting = profile.resting_kcal
+    output = tuple(bmr * ACTIVITIES[profile.activity].pal if active_kcal is None else bmr + active_kcal
+                   for bmr in resting)
+    floors = (1500, 1500) if profile.sex == "male" else (1200, 1200) if profile.sex == "female" else (1200, 1500)
+    targets = tuple(round(value * factor) for value in output)
+    if profile.goal != "gain" and profile.bmi >= 18.5:
+        targets = tuple(max(target, ceil(bmr), floor) for target, bmr, floor in zip(targets, resting, floors))
+
+    protein_rate = {"lose": 2.0, "gain": 1.7, "recomp": 2.1}[profile.goal]
+    if profile.goal == "recomp" and profile.activity == "inactive" and not (prefs and prefs.strength_days(profile.activity)):
+        protein_rate = 1.6
+    reference = profile.reference_kg
+    protein = round(reference * protein_rate)
     energy = sum(targets) / 2
-    fat_share = 0.26 if theme in CARDIO else 0.28 if theme in LARGE else 0.30 if training else 0.34
-    fat = max(0, round(energy * fat_share / 9))
+    fat_share = (0.24 if training else 0.30) if profile.goal == "recomp" else 0.25
+    fat = max(round(reference * 0.7), round(energy * fat_share / 9))
     carbs = max(0, round((energy - protein * 4 - fat * 9) / 4))
-    return DayPlan(training, tuple(targets), protein, carbs, fat, theme, prefs.time_slot if prefs and training else None)
+    return DayPlan(training, targets, protein, carbs, fat, theme, prefs.time_slot if prefs and training else None,
+                   tuple(round(v) for v in output) if active_kcal is not None else None,
+                   profile.goal, profile.maintenance_guard, resting if active_kcal is not None else None)
 
 
 def span(values):
@@ -229,11 +254,13 @@ def span(values):
     return str(low) if low == high else f"{low}–{high}"
 
 
-def move_targets(profile, origin, destination, active):
+def move_targets(profile, origin, destination, active, active_by_day=None):
     themes = dict(getattr(active, "themes", {}))
     themes[destination] = training_theme(profile, origin, active)
     proposed = TrainingCalendar((active - {origin}) | {destination}, themes)
-    return tuple((day_plan(profile, day, active), day_plan(profile, day, proposed))
+    activity = active_by_day or {}
+    return tuple((day_plan(profile, day, active, active_kcal=activity.get(day)),
+                  day_plan(profile, day, proposed, active_kcal=activity.get(day)))
                  for day in (origin, destination))
 
 

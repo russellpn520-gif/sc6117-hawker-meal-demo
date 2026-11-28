@@ -115,9 +115,9 @@ else:
                 app.button(key="cancel_training_move").click().run()
                 self.assertEqual(planned_days(profile, self.today, end, db_path=self.db), days)
             else:
-                # Another browser moves a different workout across the same two weeks.
+                # Another browser uses the same destination before confirmation.
                 other = self.today + timedelta(days=2)
-                new = self.today + timedelta(days=10)
+                new = alternative
                 self.assertTrue(move_workout(profile, other, new, db_path=self.db))
                 app.button(key="confirm_training_move").click().run()
                 self.assertTrue(any("未保存" in m.value for m in app.info))

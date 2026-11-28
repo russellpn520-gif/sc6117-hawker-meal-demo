@@ -81,9 +81,11 @@ uv run streamlit run app.py --server.address 127.0.0.1 --server.port 8617
 
 四档将主流应用的活动系数、训练频率和运动员训练量简化为一道选择题。初始日期从建档日算起并每七天重复。休息与训练的具体日期可以调整。[Cronometer 活动系数](https://support.cronometer.com/hc/en-us/articles/31974307318420-Energy-Expenditure) · [Polar 训练背景](https://support.polar.com/uk-en/support/what_is_my_training_background) · [新加坡身体活动指南](https://ch-api.healthhub.sg/api/public/content/05d4db1555854bd28def9106daf34a8d?v=5fc26500)
 
-平均每日维持热量约为静息代谢乘以活动系数。可在个人设置选择温和减脂或增重，演示目标在均值基础上调整约 5%。专业运动员维持原估值，BMI 低于 18.5 时也不会下调。建档日起每七天保持同一热量预算，训练日和休息日的目标相差约均值的 8% 至 10%。这个比例是为了示范日程联动，具体目标应结合实际情况校准。跨周改期时两周分别平衡。餐食记录始终按实际用餐日期统计。
+三种体态目标为减脂、增肌、减脂 + 增肌（默认）。按力量／有氧／休息日，演示系数分别为减脂 0.90／0.90／0.80、增肌 1.14／1.14／1.05、重塑 1.03／0.95／0.88。平时用全天静息代谢 × 活动系数；同步后用全天静息代谢 + 当天累计活动千卡。步数仅展示。当天数据覆盖更新，改期只改变对应日期的目标。运动员以及偏瘦且选择减脂或重塑的人使用维持系数。
 
-蛋白质的起始系数依次为每公斤体重 0.8、1.0、1.2、1.5 g；50 岁及以上取至少 1.2 g。基础训练日再增加每公斤 0.1 g。启用分化课表后，本项目在力量日按至少 1.6 g/kg、有氧日按至少 1.4 g/kg 规划蛋白质。热量取目标区间中点，脂肪约占 26% 至 34%，余下能量按 4/4/9 分配。具体分日比例与每四周减量是演示规划规则。孕哺期、康复期或有特殊需求的用户可与专业人员商定个人目标。[成人蛋白质参考](https://www.healthhub.sg/well-being-and-lifestyle/food-diet-and-nutrition/why_protein_is_important) · [运动营养参考](https://www.healthhub.sg/well-being-and-lifestyle/food-diet-and-nutrition/power_up_sports_nutrition)
+每日蛋白参考量按上述三项目标分别取 2.0、1.7、2.1 g/kg；无力量课表且久坐的重塑目标取 1.6。BMI 超过 25 时只计入超过 BMI 25 对应体重部分的 40%。脂肪占 25%，重塑训练日 24%、休息日 30%，且不少于参考体重 × 0.7 g/kg（四舍五入）。区间目标按中点分配宏量营养素。非偏瘦减脂或重塑的能量下限为全天静息代谢与性别下限（1200 或 1500 kcal）的较高者。这些系数为课程产品的规划规则。[Mifflin–St Jeor 公式](https://pubmed.ncbi.nlm.nih.gov/2305711/) · [NIH 运动营养资料](https://ods.od.nih.gov/factsheets/ExerciseandAthleticPerformance-HealthProfessional/)
+
+在首页「同步健康数据」可复制 iPhone 快捷指令的 URL 模板。运行指令时只传当日活动千卡和可选步数。网页按新加坡日期写入打开链接的浏览器日记，并清除这两个查询参数。示例按钮使用虚构的 Apple Watch 数据，试玩日记与个人日记隔离。全天基础代谢是公式估算，活动能量只累计到同步时。[Apple 活动能量](https://developer.apple.com/documentation/healthkit/hkquantitytypeidentifier/activeenergyburned) · [设备能量估算验证](https://doi.org/10.3390/jpm7020003)
 
 ## 数据从哪里来
 

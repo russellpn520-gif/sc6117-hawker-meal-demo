@@ -26,8 +26,8 @@ def target_control(state, today, db_path):
     target = meal_target(plan, eaten, rows, partial, choice)
     if target.amounts:
         n = target.amounts
-        st.caption(tr(f"本顿参考约 {n['kcal']:.0f} kcal · 蛋白 {n['protein_g']:.0f} g · 碳水 {n['carb_g']:.0f} g · 脂肪 {n['fat_g']:.0f} g",
-                      f"Meal guide · {n['kcal']:.0f} kcal · protein {n['protein_g']:.0f} g · carbs {n['carb_g']:.0f} g · fat {n['fat_g']:.0f} g"))
+        st.caption(tr(f"本顿参考约 {n['kcal']:.0f} kcal · 蛋白 {n['protein_g']:.0f}\u00a0g · 碳水 {n['carb_g']:.0f}\u00a0g · 脂肪 {n['fat_g']:.0f}\u00a0g",
+                      f"Meal guide · {n['kcal']:.0f} kcal · protein {n['protein_g']:.0f}\u00a0g · carbs {n['carb_g']:.0f}\u00a0g · fat {n['fat_g']:.0f}\u00a0g"))
     elif partial:
         st.caption(tr("今天有部分记录，先按饮食偏好选餐。", "Some entries are partial. Picks use your food preferences."))
     return target
@@ -41,11 +41,11 @@ def show_booster(side, main, key):
     picked = st.checkbox(tr(f"顺手加一份 · {name}", f"Add a side · {name}"), value=True, key="side_" + key)
     item = side["items"][0]
     combined = total_nutrients([main, n]) if picked else main
-    st.caption(tr(f"主餐 {main['kcal']:.0f} kcal / {main['protein_g']:.1f} g 蛋白 · 加配 +{n['kcal']:.0f} kcal / +{n['protein_g']:.1f} g",
-                  f"Main {main['kcal']:.0f} kcal / {main['protein_g']:.1f} g protein · side +{n['kcal']:.0f} kcal / +{n['protein_g']:.1f} g"))
-    st.markdown(tr(f"**所选合计 {combined['kcal']:.0f} kcal · 蛋白质 {combined['protein_g']:.1f} g**",
-                   f"**Selected total {combined['kcal']:.0f} kcal · {combined['protein_g']:.1f} g protein**"))
-    st.caption(f"[{name} · {item['confirmed_g']} g]({item['source_url']})")
+    st.caption(tr(f"主餐 {main['kcal']:.0f} kcal / {main['protein_g']:.1f}\u00a0g 蛋白 · 加配 +{n['kcal']:.0f} kcal / +{n['protein_g']:.1f}\u00a0g",
+                  f"Main {main['kcal']:.0f} kcal / {main['protein_g']:.1f}\u00a0g protein · side +{n['kcal']:.0f} kcal / +{n['protein_g']:.1f}\u00a0g"))
+    st.markdown(tr(f"**所选合计 {combined['kcal']:.0f} kcal · 蛋白质 {combined['protein_g']:.1f}\u00a0g**",
+                   f"**Selected total {combined['kcal']:.0f} kcal · {combined['protein_g']:.1f}\u00a0g protein**"))
+    st.caption(f"[{name} · {item['confirmed_g']}\u00a0g]({item['source_url']})")
     return side["key"] if picked else None
 
 
@@ -75,8 +75,8 @@ def local_card(state, target, db_path, budget_sgd):
     with st.container(border=True):
         st.markdown("**" + name + "**")
         st.caption(tr(*fit_reason(target, totals, vegetable_grams(items))))
-        st.write(tr(f"约 {totals['kcal']:.0f} kcal · 蛋白 {totals['protein_g']:.1f} g · 碳水 {totals['carb_g']:.0f} g · 脂肪 {totals['fat_g']:.0f} g",
-                    f"About {totals['kcal']:.0f} kcal · protein {totals['protein_g']:.1f} g · carbs {totals['carb_g']:.0f} g · fat {totals['fat_g']:.0f} g"))
+        st.write(tr(f"约 {totals['kcal']:.0f} kcal · 蛋白 {totals['protein_g']:.1f}\u00a0g · 碳水 {totals['carb_g']:.0f}\u00a0g · 脂肪 {totals['fat_g']:.0f}\u00a0g",
+                    f"About {totals['kcal']:.0f} kcal · protein {totals['protein_g']:.1f}\u00a0g · carbs {totals['carb_g']:.0f}\u00a0g · fat {totals['fat_g']:.0f}\u00a0g"))
         if not snack:
             st.write(tr(*recipe.prepare))
             room = cap - pick["cost_cents"] if cap is not None else None
@@ -90,7 +90,7 @@ def local_card(state, target, db_path, budget_sgd):
             st.caption(tr(f"有参考单价的食材用量估算 S${cost:.2f}。", f"Estimated cost of priced ingredients S${cost:.2f}."))
         with st.expander(tr("参考份量与来源", "Portions and sources")):
             for part in items:
-                st.markdown(f"[{food_name(load_foods()[part['food_id']])} · {part['confirmed_g']} g]({part['source_url']})")
+                st.markdown(f"[{food_name(load_foods()[part['food_id']])} · {part['confirmed_g']}\u00a0g]({part['source_url']})")
         if st.button(tr("这顿就吃这个（加入草稿）", "Add to meal draft"), type="primary", key="local_meal_add"):
             request_id = state.setdefault("local_draft_ids", {}).setdefault(key, str(uuid4()))
             try:

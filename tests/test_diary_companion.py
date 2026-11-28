@@ -105,4 +105,4 @@ saved_receipt({'items': items, 'totals': total_nutrients([x['nutrients'] for x i
 """).run()
         self.assertFalse(app.exception)
         self.assertIn("half eaten", app.caption[0].value)
-        self.assertIn(f"{self.items[0]['nutrients']['protein_g']:.1f} g", app.caption[0].value)
+        self.assertIn(f"{self.items[0]['nutrients']['protein_g']:.1f}\u00a0g", app.caption[0].value)
