@@ -15,9 +15,13 @@ def apply_mobile_style():
     st.html("""
     <style>
       :root {
-        --meal-green: #216650;
-        --meal-selected: #285e4b;
-        --meal-focus: #5a9874;
+        --meal-cta: #D96B38;
+        --meal-card: var(--st-secondary-background-color, light-dark(#fff, #272B29));
+        --meal-ink: var(--st-text-color, light-dark(#1B201E, #F6F5F1));
+        --meal-edge: light-dark(#E6E4DC, #4B4F4D);
+        --meal-soft: light-dark(#F3F2EE, #343937);
+        --meal-selected: #1B201E;
+        --meal-focus: #98613E;
       }
       .stMainBlockContainer {
         max-width: 46rem;
@@ -71,59 +75,79 @@ def apply_mobile_style():
       [class*="st-key-review_row_"] .stMarkdown p {margin: 0; line-height: 1.4; overflow-wrap: anywhere;}
       [class*="st-key-review_row_"] .stButton button {width: 44px; min-height: 44px; padding: 0;
         border: 0; color: inherit; background: transparent; font-size: 1.2rem;}
-      .st-key-hawker_drinks {flex-wrap: wrap; gap: .4rem .45rem;}
-      .st-key-hawker_drinks .stButton button {
-        min-height: 44px; max-width: 100%; padding: .4rem .8rem;
-        border: 1px solid #6f927a; border-radius: 2rem;
-        color: inherit; background-color: rgba(114, 157, 119, .12);
+      :is(.stMain,[role="dialog"]) button:is([kind="primary"],[data-testid="stBaseButton-primaryFormSubmit"]):not(:disabled) {
+        background:var(--meal-cta); border-color:var(--meal-cta); color:white;
       }
-      .st-key-hawker_drinks .stButton button:is(:hover,:active,:focus-visible):not(:disabled) {
-        color: inherit; border-color: #518766; background-color: rgba(114, 157, 119, .23);
+      :is(.stMain,[role="dialog"]) button:is([kind="primary"],[data-testid="stBaseButton-primaryFormSubmit"]) p {
+        font-size:1.18rem; font-weight:700;
       }
-      .st-key-hawker_drinks .stButton button:disabled {color: inherit; border-style: dashed; opacity: .8;}
-      .st-key-hawker_drinks .stButton button p {color: inherit; overflow-wrap: anywhere;}
-      .stMain button[kind="primary"]:not(:disabled),
-      .stMain [data-testid="stBaseButton-primaryFormSubmit"]:not(:disabled) {
-        border-color: var(--meal-green);
-        background: var(--meal-green);
-        color: white;
+      :is(.stMain,[role="dialog"]) button:is([kind="primary"],[data-testid="stBaseButton-primaryFormSubmit"]):hover:not(:disabled) {
+        background:#C45B2A; border-color:#C45B2A;
       }
-      .stMain [role="radiogroup"] button[aria-checked="true"],
+      :where(.stMain,[role="dialog"]) button[kind="secondary"] {
+        background:var(--meal-soft);border-color:light-dark(#D7D5CC,#565A57);color:var(--meal-ink);
+      }
+      :is(.stMain,[role="dialog"]) [role="radiogroup"] button[aria-checked="true"],
       .stMain .stButtonGroup [role="radiogroup"] [role="radio"][data-selected]:not([data-disabled]),
-      .stMain [data-testid="stBaseButton-segmented_controlActive"] {
+      :is(.stMain,[role="dialog"]) [data-testid="stBaseButton-segmented_controlActive"] {
         border-color: var(--meal-selected);
         background: var(--meal-selected);
         color: white;
       }
       .stMain .stMultiSelect [data-tag]:not([aria-disabled="true"]) {
-        background-color: var(--meal-green);
+        background-color: var(--meal-selected);
         color: #fff;
       }
       .stMain :is(.stMultiSelect, .stSelectbox) [data-focus-within]:not([data-invalid]),
       .stMain .stTextInput [data-baseweb="input"]:focus-within {
-        border-color: #538971;
-        outline: 2px solid #64a48a;
+        border-color: #8D684F;
+        outline: 2px solid #BC9277;
         outline-offset: 1px;
       }
       .stMain .stButtonGroup [role="radio"]:not(:disabled):is(:hover, :active) {
-        border-color: #538971;
+        border-color: #8D684F;
       }
       .stMain .stButtonGroup [role="radio"]:not([data-selected], [data-disabled]):is([data-hovered], [data-pressed]) {
-        border-color: #538971;
-        background-color: rgba(100, 151, 121, .16);
+        border-color: #8D684F;
+        background-color: rgba(164, 133, 106, .12);
         color: inherit;
       }
       .stMain button:focus-visible, .stMain summary:focus-visible {
         outline: 3px solid var(--meal-focus);
         outline-offset: 2px;
       }
-      .st-key-day_strip {
-        border: 1px solid rgba(106, 143, 113, .38);
-        border-radius: .85rem;
-        background: rgba(113, 156, 110, .10);
-        padding: .72rem .85rem;
-        gap: .35rem;
+      :is(.st-key-day_strip,.st-key-training_calendar,.st-key-training_focus,[class*="st-key-hawker_card_"]) {
+        background:var(--meal-card);border:1px solid var(--meal-edge);border-radius:1rem;
+        box-shadow:0 2px 10px rgba(18,22,20,.05);padding:.85rem;
       }
+      .st-key-day_strip {gap:.35rem;}
+      .st-key-training_header {flex-wrap:nowrap;justify-content:space-between;}
+      .st-key-training_header h3,.focus-heading h3 {margin:0;padding:0;}
+      .st-key-training_header .stElementContainer:has(.stButton) {flex:0 0 auto;}
+      .st-key-training_calendar {padding:.65rem .45rem;gap:.35rem;}
+      .cal-weekdays,[class*="st-key-cal_week_"] {display:grid !important;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px;}
+      .cal-weekdays {text-align:center;font-size:.72rem;font-weight:600;}
+      [class*="st-key-cal_day_"] {min-width:0 !important;width:100% !important;}
+      [class*="st-key-cal_day_"] button {width:100%;min-height:54px;padding:3px 0;border:1px solid transparent;
+        background:color-mix(in srgb,var(--day-tone) 12%,var(--meal-card));color:var(--meal-ink);border-radius:.55rem;}
+      [class*="st-key-cal_day_"] button p {font-size:.69rem;line-height:1.15;white-space:normal;}
+      [class*="st-key-cal_day_"] button em {position:absolute;width:1px;height:1px;padding:0;overflow:hidden;
+        white-space:nowrap;clip-path:inset(50%);}
+      [class*="st-key-cal_day_"] button strong {font-size:.95rem;font-variant-numeric:tabular-nums;}
+      [class*="st-key-cal_day_"][class*="_today"] button {border-color:var(--meal-ink);}
+      [class*="st-key-cal_day_"][class*="_selected"] button {background:var(--day-tone);color:#101612;}
+      [class*="st-key-cal_day_"][class*="_strength"],.focus-badge.strength {--day-tone:#D96B38;}
+      [class*="st-key-cal_day_"][class*="_cardio"],.focus-badge.cardio {--day-tone:#2E7CF6;}
+      [class*="st-key-cal_day_"][class*="_done"] {--day-tone:#1E9B75;}
+      [class*="st-key-cal_day_"][class*="_rest"] {--day-tone:#9A9E9B;}
+      .focus-badge.recovery {--day-tone:#8566E3;}
+      .focus-heading {display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .65rem;}
+      .focus-badge {padding:.25rem .55rem;border-radius:.6rem;font-size:.83rem;font-weight:600;
+        background:color-mix(in srgb,var(--day-tone) 15%,var(--meal-card));border-inline-start:3px solid var(--day-tone);}
+      .focus-exercises {list-style:none;margin:0;padding:0 !important;}
+      .focus-exercises li {padding:.48rem .25rem;border-top:1px solid var(--meal-edge);font-size:.94rem;line-height:1.4;}
+      .st-key-move_choices button {border-radius:1.5rem;min-height:44px;}
+      .st-key-training_sources button {font-size:.86rem;text-decoration:underline;text-underline-offset:.22em;}
       .st-key-day_strip :is([data-testid="stMarkdownContainer"], [data-testid="stCaptionContainer"]) {
         margin-bottom: 0;
       }
@@ -142,17 +166,19 @@ def apply_mobile_style():
       .meal-meter-line small {font-size: .78rem; color: inherit; opacity: .83;}
       .meal-track {
         height: 6px; margin-top: .3rem; border-radius: 1rem; overflow: hidden;
-        background: rgba(115, 146, 123, .22);
+        background: light-dark(rgba(27,32,30,.10),rgba(245,245,240,.16));
       }
-      .meal-track span {display: block; height: 100%; border-radius: inherit; background: #659779;}
-      .meal-track.in-range span {background: #b59a59;}
-      .meal-track.above-range span {background: #c18950;}
+      .meal-track span {display: block; height: 100%; border-radius: inherit; background: #D96B38;}
+      .macro-meters > :nth-child(1) .meal-track span {background:#1E9B75;}
+      .macro-meters > :nth-child(2) .meal-track span {background:#2E7CF6;}
+      .macro-meters > :nth-child(3) .meal-track span {background:#8566E3;}
+      .meal-meters > :first-child .meal-track.above-range span {background:#C88A2E;}
       .meal-track.no-target {height: 2px;}
       .meal-rhythm {display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); gap: 2px; margin: .15rem 0 .35rem;
                     list-style: none; padding: 0; padding-inline-start: 0 !important;}
       .meal-rhythm li {display: grid; justify-items: center; gap: .3rem; font-size: .78rem; font-variant-numeric: tabular-nums;}
       .meal-rhythm i {box-sizing: border-box; width: .72rem; height: .72rem; border: 1px solid #779281; border-radius: 50%;}
-      .meal-rhythm .logged i {background: #77a987; border-color: #577e63;}
+      .meal-rhythm .logged i {background: #1E9B75; border-color: #1E9B75;}
       .meal-rhythm .is-today {font-weight: 650;}
       :is(.st-key-day_strip, .st-key-home_before, .st-key-home_pending) [data-testid="stCaptionContainer"] {
         color: inherit; opacity: .84;

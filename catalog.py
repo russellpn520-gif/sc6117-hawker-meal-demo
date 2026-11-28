@@ -7,12 +7,16 @@ from functools import lru_cache
 from pathlib import Path
 
 
+from meal_drinks import KOPI_C_PORTIONS
+
+
 ROOT = Path(__file__).resolve().parent
 NUTRIENTS = ("kcal", "protein_g", "carb_g", "fat_g")
 HPB = ("https://isomer-user-content.by.gov.sg/484/d2884b81-4dfc-4a9e-b153-1487969794d5/"
        "obesity-cpg_main_for-online-30-aug.pdf")
 GYG = "https://www.guzmanygomez.com.au/wp-content/uploads/2026/11/261029_NUTRITION_ALLERGEN_GUIDE_420X297MM.pdf"
 SOURCES = {
+    "recipe": ("USDA · 配方估算", "https://github.com/russellpn520-gif/sc6117-hawker-meal-demo#kopi-c-siu-dai"),
     "hpb": ("HPB · 新加坡", HPB),
     "fndds": ("USDA · 膳食调查", "https://fdc.nal.usda.gov/food-details/{code}/nutrients"),
     "sr": ("USDA · SR Legacy", "https://fdc.nal.usda.gov/food-details/{code}/nutrients"),
@@ -254,7 +258,14 @@ def _read_foods(revision):
                 foods.append(Food(key, label.get("name") or r["name"], r.get("source_name") or r["name"],
                                   aliases, portion, ref, {k: float(r[k]) for k in NUTRIENTS},
                                   source, code, r.get("portion_label", "标准一份")))
-    catalog = Catalog(foods, set(custom) | {f.food_id for f in foods if f.source == "hpb"})
+    ingredients = {f.food_id: f for f in foods if f.food_id in KOPI_C_PORTIONS}
+    nutrients = {n: sum(ingredients[k].nutrients[n] * grams / ingredients[k].reference_g
+                        for k, grams in KOPI_C_PORTIONS.items()) for n in NUTRIENTS}
+    cup = sum(KOPI_C_PORTIONS.values())
+    foods.append(Food("kopi-c-siu-dai", "Kopi C Siu Dai（少糖淡奶咖啡）", "Kopi C Siu Dai",
+                      ("少糖淡奶咖啡", "少糖奶咖", "kopi c", "coffee with evaporated milk and less sugar"),
+                      cup, cup, nutrients, "recipe", "kopi-c", "估算一杯"))
+    catalog = Catalog(foods, {"kopi-c-siu-dai"} | set(custom) | {f.food_id for f in foods if f.source == "hpb"})
     if set(custom) - catalog.keys() or len(catalog) != len(foods):
         raise ValueError("食物库中存在重复或失效的条目标识。")
     return catalog

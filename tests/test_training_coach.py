@@ -99,6 +99,7 @@ training_plan(p,day,calendar_for_view(p,day,path),path)
 """
         app = AppTest.from_string(src).run()
         self.assertFalse(app.exception)
+        app.button(key="open_workout_log").click().run()
         next(w for w in app.text_input if "squat" in w.label).set_value("8, 7")
         next(w for w in app.text_input if "curl" in w.label).set_value("8, 6")
         next(w for w in app.text_input if "per dumbbell" in w.label).set_value("2, 1.5")

@@ -7,9 +7,9 @@ from unittest.mock import patch
 from streamlit.testing.v1 import AppTest
 
 from app import next_meal_due
-from meal_drinks import add_drink, available_drinks
-from meals import (SG_TIME, MealChangedError, create_pending, get_pending, get_profile, list_meals, list_pending,
-                   load_foods, make_draft, portion_items, save_meal)
+from meal_drinks import KOPI_C_PORTIONS
+from meals import (SG_TIME, get_profile, list_meals, list_pending,
+                   load_foods, portion_items)
 from nutrition_coach import Preferences, get_preferences, save_preferences
 from sample_meal import practice_path, start_practice
 
@@ -35,14 +35,15 @@ class PracticeAndDrinksTests(unittest.TestCase):
             self.assertTrue(draft["photo"].startswith(b"\xff\xd8"))
             prefix = f"meal-{draft['id']}-v3"
             ui.segmented_control(key=prefix + "-eaten-fdc-2708407-en").set_value(2).run()
-            ui.button(key=prefix + "-cup-kopi").click().run()
-            self.assertEqual(ui.button(key=prefix + "-cup-kopi").label, "✓ Kopi O Kosong ×")
+            self.assertFalse(any("-cup-" in (b.key or "") for b in ui.button))
+            ui.text_input(key=prefix + "-search").set_value("Kopi O Kosong").run()
+            ui.multiselect(key=prefix + "-foods-en").select("fdc-2710375").run()
             ui.button(key=prefix + "-confirm").click().run()
             self.assertFalse(ui.exception)
             record, = list_meals(self.today, db_path=path)
             grams = {item["food_id"]: item["confirmed_g"] for item in record["items"]}
             self.assertEqual(grams["fdc-2708407"], 90)
-            self.assertEqual(grams["fdc-2710375"], 200)
+            self.assertEqual(grams["fdc-2710375"], load_foods()["fdc-2710375"].serving_g)
             self.assertTrue(record["has_thumbnail"])
             ui.button(key="leave_practice").click().run()
             self.assertTrue(ui.button(key="sample_chicken"))
@@ -61,23 +62,16 @@ class PracticeAndDrinksTests(unittest.TestCase):
         self.assertEqual(start_practice(self.diary, self.today, restart=True), (path, key))
         self.assertEqual(len(list_pending(db_path=path)), 1)
         self.assertEqual(get_preferences(path), prefs)
-        self.assertFalse(add_drink(path, key, "kopi_c"))
-        self.assertFalse(add_drink(path, key, "soy"))
-        self.assertEqual(set(available_drinks(prefs)), {"kopi", "teh"})
 
-    def test_a_cup_is_saved_once_and_present_in_both_portion_views(self):
-        draft = make_draft("photo", "rice", {"white-rice": 100}, [])
-        draft.update(status="ready", variants={"按配料": {"suggested_grams": {"white-rice": 100}}})
-        create_pending(draft, db_path=self.diary)
-        self.assertTrue(add_drink(self.diary, draft["id"], "kopi_c"))
-        self.assertFalse(add_drink(self.diary, draft["id"], "kopi_c"))
-        saved = get_pending(draft["id"], db_path=self.diary)
-        self.assertEqual(saved["input"]["suggested_grams"], saved["variants"]["按配料"]["suggested_grams"])
-        self.assertEqual(sum(saved["input"]["suggested_grams"].values()), 300)
-        self.assertEqual(saved["quick_drinks"], ["kopi_c"])
-        with self.assertRaises(MealChangedError):
-            save_meal(draft, portion_items(load_foods(), {"white-rice": 100}), db_path=self.diary)
-        self.assertIsNotNone(get_pending(draft["id"], db_path=self.diary))
+    def test_local_drinks_are_searchable_and_mixed_cup_uses_ingredient_nutrients(self):
+        foods = load_foods()
+        for name, key in (("Kopi O Kosong", "fdc-2710375"), ("Kopi C Siu Dai", "kopi-c-siu-dai"),
+                          ("Teh O Kosong", "fdc-173227"), ("无糖豆浆", "fdc-2705405")):
+            self.assertEqual(foods.search(name)[0], key)
+        cup = portion_items(foods, {"kopi-c-siu-dai": 200})[0]
+        ingredients = portion_items(foods, KOPI_C_PORTIONS)
+        for nutrient, amount in cup["nutrients"].items():
+            self.assertAlmostEqual(amount, sum(i["nutrients"][nutrient] for i in ingredients))
 
     def test_three_hour_prompt_uses_latest_meal_time_not_confirmation_order(self):
         now = datetime.now(SG_TIME)

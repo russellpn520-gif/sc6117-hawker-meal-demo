@@ -1,5 +1,6 @@
 import re
 from datetime import timedelta
+from html import escape
 from typing import NamedTuple
 
 import streamlit as st
@@ -7,10 +8,10 @@ import streamlit as st
 from device_diary import forget_diary, remember_diary
 from i18n import tr
 from meals import clear_diary, move_workout, planned_days, save_profile
-from planning import (ACTIVITIES, GOALS, SEXES, THEMES, Profile, TrainingPreferences, calorie_balance,
-                      day_plan, move_targets, span, valid_training_move)
+from planning import (ACTIVITIES, CARDIO, GOALS, SEXES, THEMES, Profile, TrainingPreferences,
+                      day_plan, move_targets, span, training_theme, valid_training_move)
 from training_coach import (DAYS, EXERCISES, WEIGHTED, read_logs, save_training_log, save_training_preferences,
-                            session_lines, training_context)
+                            session_lines, session_for_day)
 
 
 class ActivityText(NamedTuple):
@@ -43,13 +44,6 @@ ACTIVITY_EN = {
     ),
 }
 GOAL_EN = {"maintain": "Maintain weight", "lose": "Gradual weight loss", "gain": "Gradual weight gain"}
-BALANCE_EN = {
-    "已超出今日目标": "Above today’s target", "今日热量": "Today’s energy",
-    "已达目标": "Target reached", "已在目标范围": "Within target range",
-    "今天还差": "Remaining today", "距今日目标下限": "To the lower end of your range",
-}
-
-
 def plan_label(plan):
     return tr(*THEMES[plan.theme if plan.training else "rest"])
 
@@ -143,47 +137,6 @@ def profile_form(profile, today, db_path, public_demo):
         st.rerun()
 
 
-def day_summary(profile, today, plan, eaten, *, partial_count=0, legacy_count=0):
-    nickname = re.sub(r"([\\`*_{}\[\]()<>#!|~$])", r"\\\1", profile.nickname)
-    name = (nickname + "的") if nickname else ""
-    st.subheader(tr(f"{name}今日计划", f"Today’s plan · {nickname}" if nickname else "Today’s plan"))
-    tier = ACTIVITIES[profile.activity]
-    goal = profile.goal if profile.goal_factor != 1 else "maintain"
-    st.caption(f"{month_day(today)} · {plan_label(plan)} · {goal_label(goal)}")
-    incomplete = partial_count or legacy_count
-    if incomplete:
-        label, value = tr("已记热量小计", "Energy logged"), f"{eaten['kcal']:.0f} kcal"
-    else:
-        label, value = calorie_balance(plan.kcal, eaten["kcal"])
-        label = tr(label, BALANCE_EN[label])
-        value = tr(value, BALANCE_EN.get(value, value))
-    with st.container(key="daily_balance"):
-        a, b = st.columns(2)
-        a.metric(label, value)
-        remaining = plan.protein_g - eaten["protein_g"]
-        if incomplete:
-            b.metric(tr("已记蛋白质小计", "Protein logged"), f"{eaten['protein_g']:.1f} g")
-        else:
-            b.metric(tr("蛋白质还差", "Protein remaining") if remaining > 0 else tr("蛋白质", "Protein"),
-                     f"{remaining:.1f} g" if remaining > 0 else tr("已达目标", "Target reached"))
-    if partial_count:
-        st.caption(tr(f"今天有 {partial_count} 笔只计入了部分食物。",
-                      f"Only some foods were included in {partial_count} of today’s entries."))
-    if legacy_count:
-        st.caption(tr(f"有 {legacy_count} 笔旧记录曾有食物未匹配，完整性待核对。",
-                      f"Check the {legacy_count} older " + ("entry" if legacy_count == 1 else "entries") +
-                      " with unmatched foods."))
-    st.write(tr(f"已记 **{eaten['kcal']:.0f} kcal** / 今日目标 **{span(plan.kcal)} kcal**",
-                f"Logged **{eaten['kcal']:.0f} kcal** · Daily target **{span(plan.kcal)} kcal**"))
-    st.caption(tr(f"静息代谢约 {span(profile.resting_kcal)} kcal/天 · 每日蛋白质目标 {plan.protein_g} g",
-                  f"Estimated resting energy {span(profile.resting_kcal)} kcal/day · Protein target {plan.protein_g} g/day"))
-    st.caption(tr(f"碳水目标 {plan.carb_g} g · 脂肪目标 {plan.fat_g} g",
-                  f"Carb target {plan.carb_g} g · fat target {plan.fat_g} g"))
-    if plan.theme in {"rest", "general"}:
-        copy = ACTIVITY_EN[profile.activity]
-        st.write(tr(tier.advice, copy.training) if plan.training else tr(tier.recovery, copy.rest))
-
-
 def _preview_date(profile, origin, destination, days, diary):
     targets = move_targets(profile, origin, destination, days)
     st.session_state.training_move_preview = (diary, origin, destination, targets)
@@ -198,19 +151,23 @@ def _review_date(profile, origin, destination, targets, db_path):
                  else tr(f"减少 {change}", f"down {change}"))
         lines.append(f"**{month_day(day)} · {plan_label(after)}**  \n"
                      f"{span(before.kcal)} → **{span(after.kcal)} kcal** ({delta} kcal)　" +
-                     tr(f"蛋白 {after.protein_g} · 碳水 {after.carb_g} · 脂肪 {after.fat_g} g",
-                        f"Protein {after.protein_g} · Carbs {after.carb_g} · Fat {after.fat_g} g"))
+                     tr(f"蛋白 {before.protein_g} → {after.protein_g} · 碳水 {before.carb_g} → {after.carb_g} · 脂肪 {before.fat_g} → {after.fat_g} g",
+                        f"Protein {before.protein_g} → {after.protein_g} · Carbs {before.carb_g} → {after.carb_g} · Fat {before.fat_g} → {after.fat_g} g"))
     comparison = "\n\n".join(lines)
     st.markdown("**" + tr("改期后的每日热量目标", "Daily targets after this move") + "**")
     st.markdown(comparison)
     if profile.week_start(origin) != profile.week_start(destination):
         st.caption(tr("这次改期跨周，两周内的其他日期也会微调，以保持各周总热量。",
                       "This move crosses two weeks. Other daily targets in those weeks adjust to keep each weekly total."))
+    elif origin.isocalendar()[:2] != destination.isocalendar()[:2]:
+        st.caption(tr("这次训练将移到另一个日历周。", "This workout moves to a different calendar week."))
     if st.button(tr("确认改期", "Confirm new date"), key="confirm_training_move", type="primary", width="stretch"):
         st.session_state.pop("training_move_preview", None)
         if move_workout(profile, origin, destination, db_path=db_path, require_current_profile=True, expected_targets=targets):
+            st.session_state.selected_day = destination
+            st.session_state.pop("training_action", None)
             st.session_state.notice = tr(f"训练已从 {month_day(origin)} 移到 {month_day(destination)}。",
-                                         f"Workout moved from {month_day(origin)} to {month_day(destination)}.") + "\n\n" + comparison
+                                         f"Workout moved from {month_day(origin)} to {month_day(destination)}.")
         else:
             st.session_state.notice = tr("训练安排或目标已有变化，这次改期未保存。请重新选择日期。",
                                          "Your schedule or targets have changed. The move was not saved. Choose new dates.")
@@ -220,198 +177,301 @@ def _review_date(profile, origin, destination, targets, db_path):
         st.rerun()
 
 
-def _schedule_dates(profile, today, days, db_path, diary):
-    upcoming = [today + timedelta(days=i) for i in range(14)]
-    tomorrow = upcoming[1]
-    logged = {row["date"] for row in read_logs(today, upcoming[-1], db_path=db_path)}
-    for day, name in [(today, tr("今天", "Today")), (tomorrow, tr("明天", "Tomorrow"))]:
-        plan = day_plan(profile, day, days)
-        st.write(f"**{name} · {plan_label(plan)}**　{span(plan.kcal)} kcal · "
-                 + tr(f"蛋白质 {plan.protein_g} g", f"{plan.protein_g} g protein"))
-    if (today in days) != (tomorrow in days) and logged.isdisjoint((today.isoformat(), tomorrow.isoformat())):
-        origin, destination = (today, tomorrow) if today in days else (tomorrow, today)
-        label = (tr("把今天的训练移到明天", "Move today’s workout to tomorrow") if origin == today
-                 else tr("把明天的训练移到今天", "Move tomorrow’s workout to today"))
-        if valid_training_move(profile, origin, destination, days - {origin}) and st.button(label, type="primary"):
-            _preview_date(profile, origin, destination, days, diary)
-    active = [d for d in upcoming if d in days]
-    movable = [d for d in active if d.isoformat() not in logged]
-    rest = [d for d in upcoming if d not in days and d.isoformat() not in logged]
-    with st.expander(tr("查看两周安排或改到其他日期", "See the next two weeks or change a date")):
-        st.caption(tr("按运动习惯生成的建议训练日，可根据自己的日程改期。",
-                      "These dates follow your usual activity level. Move a workout to fit your schedule."))
-        st.write(tr("、", ", ").join(month_day(d) for d in active)
-                 or tr("接下来两周没有训练。", "No workouts scheduled for the next two weeks."))
-        if movable and rest:
-            date_labels = {d: month_day(d) for d in upcoming}
-            origin = st.selectbox(tr("把哪天的训练移走？", "Which workout do you want to move?"),
-                                  movable, format_func=date_labels.__getitem__, key="reschedule_origin")
-            options = [d for d in rest if valid_training_move(profile, origin, d, days - {origin})]
-            if not options:
-                st.caption(tr("这两周暂无符合可用日期和恢复间隔的空档。",
-                              "There is no other date in this period that fits your availability and recovery days."))
-            else:
-                with st.form("reschedule"):
-                    destination = st.selectbox(tr("改到哪个休息日？", "Choose a rest day to train instead"),
-                                               options, format_func=date_labels.__getitem__, key="reschedule_destination")
-                    submit = st.form_submit_button(tr("预览改期", "Preview move"))
-                if submit:
-                    _preview_date(profile, origin, destination, days, diary)
-        elif active:
-            st.caption(tr("暂无可改期的训练和休息日组合。", "There are no available dates for a move."))
-
-
-def training_plan(profile, today, days, db_path):
-    st.subheader(tr("训练安排", "Training schedule"))
-    diary = (str(db_path), st.session_state.get("diary_token"), today)
-    preview = st.session_state.get("training_move_preview")
-    if preview and preview[0] == diary:
-        _review_date(profile, *preview[1:], db_path)
-    else:
-        st.session_state.pop("training_move_preview", None)
-        _schedule_dates(profile, today, days, db_path, diary)
-    _strength_panel(profile, today, db_path)
-
-
-def _strength_panel(profile, today, db_path):
+def _setup_form(profile, today, db_path):
     prefs = profile.training
-    with st.expander(tr("调整我的课表", "Workout preferences"),
-                     expanded=bool(st.session_state.pop("edit_training_setup", False))):
-        with st.form("training_availability"):
-            labels = {i: tr("周" + name[0], name[1]) for i, name in enumerate(DAYS)}
-            weekdays = st.multiselect(tr("一周哪几天有空？", "Which weekdays are available?"), list(labels),
-                                      default=list(prefs.weekdays) if prefs else [], format_func=labels.__getitem__)
-            def choose(label, choices, default):
-                names = {key: tr(*pair) for key, pair in choices.items()}
-                return st.selectbox(tr(*label), list(names), index=list(names).index(default),
-                                    format_func=names.__getitem__)
+    with st.form("training_availability"):
+        labels = {i: tr("周" + name[0], name[1]) for i, name in enumerate(DAYS)}
+        weekdays = st.multiselect(tr("一周哪几天有空？", "Which weekdays are available?"), list(labels),
+                                  default=list(prefs.weekdays) if prefs else [], format_func=labels.__getitem__)
+        def choose(label, choices, default):
+            names = {key: tr(*pair) for key, pair in choices.items()}
+            return st.selectbox(tr(*label), list(names), index=list(names).index(default),
+                                format_func=names.__getitem__)
 
-            equipment = choose(("可用器械", "Available equipment"), {
-                "bodyweight": ("居家徒手", "Bodyweight"), "dumbbells": ("居家哑铃", "Dumbbells"),
-                "gym": ("健身房器械", "Gym equipment")}, prefs.equipment if prefs else "bodyweight")
-            mode = choose(("训练模式", "Training style"), {
-                "strength": ("力量为主", "Strength"), "mixed": ("力量 + 有氧", "Strength + cardio"),
-                "cardio": ("有氧为主", "Cardio")}, (prefs.mode if prefs else None) or "strength")
-            cardio = choose(("有氧日做什么？", "Cardio activity"), {k: THEMES[k] for k in ("run", "swim", "cycle", "walk")},
-                            prefs.cardio if prefs else "run")
-            minutes = st.select_slider(tr("每次可用时间（分钟）", "Minutes available per workout"), [10, 20, 30, 45, 60],
-                                       value=prefs.minutes if prefs else 20)
-            slot = choose(("通常什么时候练？", "Usual workout time"), {
-                None: ("随时", "Flexible"), "morning": ("早上", "Morning"), "afternoon": ("下午", "Afternoon"),
-                "evening": ("傍晚", "Evening")}, prefs.time_slot if prefs else None)
-            st.caption(tr("每个选中的日子安排一节课，之后可以单独改期。", "Each selected day gets a session. You can move individual workouts later."))
-            if st.form_submit_button(tr("应用训练安排", "Apply training schedule")):
-                if not weekdays:
-                    st.warning(tr("请选择至少一个可训练日。", "Choose at least one available day."))
-                else:
-                    new = TrainingPreferences(equipment=equipment, weekdays=weekdays, minutes=minutes, since=today,
-                                              mode=mode, cardio=cardio, time_slot=slot)
-                    save_training_preferences(profile, new, db_path=db_path)
-                    st.rerun()
-    if not prefs:
-        return
-    lang = tr("zh", "en")
-    context = training_context(profile, today, db_path=db_path, lang=lang)
-    with st.expander(tr("未来 7 天课表", "Next 7 days")):
-        for item in context["sessions"]:
-            if item["mode"] != "rest":
-                st.markdown("**" + item["date"] + "** · " + "　".join(session_lines(item, lang)))
-    session = next((s for s in context["sessions"] if s["mode"] != "rest"), None)
-    if session:
-        st.markdown("**" + tr("下一节训练", "Your next workout") + " · " + session["date"] + "**")
-        for line in session_lines(session, lang):
-            st.write(line)
-        st.caption(tr("先轻松热身，组间充分休息，按可用时间结束。有疼痛、孕期或健康状况时请先咨询专业人员。",
-                      "Warm up gently, rest between sets and finish within the time available. "
-                      "For pain, pregnancy or health conditions, consult a qualified professional."))
-        with st.expander(tr("进度与训练依据", "Progression and sources")):
-            st.caption(tr("连续两次轻松完成目标后可增加一次重复。漏练后从较轻的训练恢复；连续两次吃力或第四周减量。重量沿用实际记录。",
-                          "Two comfortable completions can earn one extra rep. A missed session eases you back in; "
-                          "two difficult sessions or week four trigger a lighter session. Weights come from your own log."))
-            st.markdown("[ACSM · Resistance training](https://acsm.org/resistance-training-guidelines-update-2026/) · [CDC · Talk test](https://www.cdc.gov/physical-activity-basics/measuring/)")
-            st.markdown("[NHS · Strength exercises](https://www.nhs.uk/live-well/exercise/strength-exercises/)")
-    _training_log_ui(profile, today, db_path, lang)
+        equipment = choose(("可用器械", "Available equipment"), {
+            "bodyweight": ("居家徒手", "Bodyweight"), "dumbbells": ("居家哑铃", "Dumbbells"),
+            "gym": ("健身房器械", "Gym equipment")}, prefs.equipment if prefs else "bodyweight")
+        mode = choose(("训练模式", "Training style"), {
+            "strength": ("力量为主", "Strength"), "mixed": ("力量 + 有氧", "Strength + cardio"),
+            "cardio": ("有氧为主", "Cardio")}, (prefs.mode if prefs else None) or "strength")
+        cardio = choose(("有氧日做什么？", "Cardio activity"), {k: THEMES[k] for k in ("run", "swim", "cycle", "walk")},
+                        prefs.cardio if prefs else "run")
+        minutes = st.select_slider(tr("每次可用时间（分钟）", "Minutes available per workout"), [10, 20, 30, 45, 60],
+                                   value=prefs.minutes if prefs else 20)
+        slot = choose(("通常什么时候练？", "Usual workout time"), {
+            None: ("随时", "Flexible"), "morning": ("早上", "Morning"), "afternoon": ("下午", "Afternoon"),
+            "evening": ("傍晚", "Evening")}, prefs.time_slot if prefs else None)
+        st.caption(tr("每个选中的日子安排一节课，之后可以单独改期。", "Each selected day gets a session. You can move individual workouts later."))
+        if st.form_submit_button(tr("应用训练安排", "Apply training schedule"), type="primary"):
+            if not weekdays:
+                st.warning(tr("请选择至少一个可训练日。", "Choose at least one available day."))
+            else:
+                new = TrainingPreferences(equipment=equipment, weekdays=weekdays, minutes=minutes, since=today,
+                                          mode=mode, cardio=cardio, time_slot=slot)
+                save_training_preferences(profile, new, db_path=db_path)
+                _dismiss_training_dialog()
+                st.session_state.pop("training_move_preview", None)
+                st.session_state.pop("training_action", None)
+                st.rerun()
 
 
-def _training_log_ui(profile, today, db_path, lang):
-    start = max(profile.start, today - timedelta(days=13))
-    eligible = sorted((d for d in planned_days(profile, start, today, db_path=db_path) if profile.training_for(d)), reverse=True)
-    recent = read_logs(start, today, db_path=db_path)
-    records = {r["date"]: r for r in recent}
-    with st.expander(tr("记录训练或漏练", "Log a workout or missed session")):
-        if not eligible:
-            st.caption(tr("第一个训练日到来后就可以在这里记录。", "You can log your first workout on its scheduled date."))
-        else:
-            day = st.selectbox(tr("训练日期", "Workout date"), eligible, format_func=str, key="workout_log_day")
-            session = training_context(profile, day, db_path=db_path, lang=lang)["sessions"][0]
-            existing = records.get(day.isoformat(), {})
-            statuses = {"comfortable": tr("顺利完成", "Comfortable"), "challenging": tr("吃力或未完成目标", "Challenging or incomplete"),
-                        "missed": tr("这次漏练", "Missed")}
-            status = st.radio(tr("这次训练怎么样？", "How did it go?"), list(statuses), horizontal=True,
-                              index=list(statuses).index(existing.get("status", "comfortable")), format_func=statuses.__getitem__,
-                              key=f"training-result-{day}")
-            with st.form(f"workout-entry-{day}-{status}"):
-                entries = {}
-                cardio_log = session["mode"] == "cardio" and status != "missed"
-                if cardio_log:
-                    saved = existing.get("actuals", {})
-                    duration = st.number_input(tr("实际分钟", "Actual minutes"), 1, 600, saved.get("minutes", session["planned_minutes"]))
-                    effort = st.slider(tr("体感强度 · 1 很轻松，10 很吃力", "Effort · 1 very easy, 10 very hard"), 1, 10, saved.get("rpe", 4))
-                elif status != "missed":
-                    st.caption(tr("每组实做次数用逗号隔开；没做的动作留空。",
-                                  "Enter the reps you actually did in each set, separated by commas. Leave skipped exercises blank."))
-                    for ex in session["exercises"]:
-                        key = ex["id"]
-                        saved = existing.get("actuals", {}).get(key, [])
-                        reps = st.text_input(ex["name"] + tr(" · 每组次数", " · reps per set"),
-                                             value=", ".join(str(s["reps"]) for s in saved), placeholder="8, 7",
-                                             max_chars=100)
-                        loads = ""
-                        if key in WEIGHTED:
-                            load_label = tr("每只哑铃重量（kg，每组一个数或共用一个数）",
-                                                     "Weight per dumbbell (kg, one value or one per set)") if key == "curl" else tr("每组使用重量（kg）", "Load per set (kg)")
-                            loads = st.text_input(ex["name"] + " · " + load_label,
-                                                  value=", ".join(f"{s['kg']:g}" for s in saved), placeholder=tr("例如 20", "e.g. 20"), max_chars=100,
-                                                  key=f"log-kg-{day}-{key}")
-                        entries[key] = (reps, loads)
-                if st.form_submit_button(tr("保存训练记录", "Save workout log")):
-                    try:
-                        actuals = {"minutes": duration, "rpe": effort} if cardio_log else {}
-                        for key, (reps, loads) in entries.items():
-                            if not reps.strip():
-                                continue
-                            rep_list = [int(v) for v in re.split("[,，]", reps)]
-                            kg_list = [float(v) for v in re.split("[,，]", loads)] if key in WEIGHTED else [0]
-                            if len(kg_list) == 1:
-                                kg_list *= len(rep_list)
-                            if len(kg_list) != len(rep_list):
-                                raise ValueError("sets")
-                            actuals[key] = [{"reps": r, "kg": kg} for r, kg in zip(rep_list, kg_list)]
-                        save_training_log(profile, day, today, status, actuals, db_path=db_path)
-                    except (TypeError, ValueError):
-                        st.warning(tr("请核对每组实做次数和哑铃重量，或选择「这次漏练」。",
-                                      "Check actual reps and dumbbell weights, or select Missed."))
-                    else:
-                        st.session_state.notice = tr("训练记录已保存。", "Workout logged.")
-                        st.rerun()
-        if recent:
-            for record in reversed(recent[-4:]):
-                lines = []
-                actuals = record["actuals"]
-                if "minutes" in actuals:
-                    lines.append(f"{actuals['minutes']} min · RPE {actuals['rpe']}/10")
-                for key, sets in actuals.items():
-                    if key not in EXERCISES:
+def _training_log_ui(profile, day, today, session, existing, db_path):
+    statuses = {"comfortable": tr("顺利完成", "Comfortable"), "challenging": tr("吃力或未完成目标", "Challenging or incomplete"),
+                "missed": tr("这次漏练", "Missed")}
+    status = st.radio(tr("这次训练怎么样？", "How did it go?"), list(statuses), horizontal=True,
+                      index=list(statuses).index(existing.get("status", "comfortable")), format_func=statuses.__getitem__,
+                      key=f"training-result-{day}")
+    with st.form(f"workout-entry-{day}-{status}"):
+        entries = {}
+        cardio_log = session["mode"] == "cardio" and status != "missed"
+        if cardio_log:
+            saved = existing.get("actuals", {})
+            duration = st.number_input(tr("实际分钟", "Actual minutes"), 1, 600, saved.get("minutes", session["planned_minutes"]))
+            effort = st.slider(tr("体感强度 · 1 很轻松，10 很吃力", "Effort · 1 very easy, 10 very hard"), 1, 10, saved.get("rpe", 4))
+        elif status != "missed":
+            st.caption(tr("每组实做次数用逗号隔开；没做的动作留空。",
+                          "Enter the reps you actually did in each set, separated by commas. Leave skipped exercises blank."))
+            for ex in session["exercises"]:
+                key = ex["id"]
+                saved = existing.get("actuals", {}).get(key, [])
+                reps = st.text_input(ex["name"] + tr(" · 每组次数", " · reps per set"),
+                                     value=", ".join(str(s["reps"]) for s in saved), placeholder="8, 7",
+                                     max_chars=100)
+                loads = ""
+                if key in WEIGHTED:
+                    load_label = tr("每只哑铃重量（kg，每组一个数或共用一个数）",
+                                             "Weight per dumbbell (kg, one value or one per set)") if key == "curl" else tr("每组使用重量（kg）", "Load per set (kg)")
+                    loads = st.text_input(ex["name"] + " · " + load_label,
+                                          value=", ".join(f"{s['kg']:g}" for s in saved), placeholder=tr("例如 20", "e.g. 20"), max_chars=100,
+                                          key=f"log-kg-{day}-{key}")
+                entries[key] = (reps, loads)
+        if st.form_submit_button(tr("保存训练记录", "Save workout log"), type="primary"):
+            try:
+                actuals = {"minutes": duration, "rpe": effort} if cardio_log else {}
+                for key, (reps, loads) in entries.items():
+                    if not reps.strip():
                         continue
-                    name = EXERCISES[key][lang == "en"]
-                    numbers = ", ".join(f"{s['reps']} × {s['kg']:g} kg" if key in WEIGHTED else str(s["reps"]) for s in sets)
-                    lines.append(f"{name} ({numbers})")
-                st.caption(record["date"] + " · " + (" / ".join(lines) if lines else tr("漏练", "Missed")))
+                    rep_list = [int(v) for v in re.split("[,，]", reps)]
+                    kg_list = [float(v) for v in re.split("[,，]", loads)] if key in WEIGHTED else [0]
+                    if len(kg_list) == 1:
+                        kg_list *= len(rep_list)
+                    if len(kg_list) != len(rep_list):
+                        raise ValueError("sets")
+                    actuals[key] = [{"reps": r, "kg": kg} for r, kg in zip(rep_list, kg_list)]
+                save_training_log(profile, day, today, status, actuals, db_path=db_path)
+            except (TypeError, ValueError):
+                st.warning(tr("请核对每组实做次数和哑铃重量，或选择「这次漏练」。",
+                              "Check actual reps and dumbbell weights, or select Missed."))
+            else:
+                st.session_state.notice = tr("训练记录已保存。", "Workout logged.")
+                st.session_state.pop("training_action", None)
+                st.rerun()
+
+
+def _actual_summary(record, lang):
+    lines = []
+    actuals = record["actuals"]
+    if "minutes" in actuals:
+        minutes, effort = actuals["minutes"], actuals["rpe"]
+        lines.append(tr(f"{minutes} 分钟 · 用力程度 {effort}/10", f"{minutes} min · RPE {effort}/10"))
+    for key, sets in actuals.items():
+        if key not in EXERCISES:
+            continue
+        name = EXERCISES[key][lang == "en"]
+        numbers = ", ".join(f"{s['reps']} × {s['kg']:g} kg" if key in WEIGHTED else str(s["reps"]) for s in sets)
+        lines.append(f"{name} ({numbers})")
+    st.write(" · ".join(lines) if lines else tr("已标记漏练", "Marked as missed"))
+
+
+DAY_TAG = {
+    "push": ("推", "Push"), "pull": ("拉", "Pull"), "legs": ("腿", "Legs"),
+    "chest": ("胸", "Chest"), "back": ("背", "Back"), "full": ("全", "Full"),
+    "upper": ("上", "Upper"), "lower": ("下", "Lower"), "core": ("核", "Core"),
+    "general": ("全", "Full"), "run": ("跑", "Run"), "swim": ("游", "Swim"),
+    "cycle": ("骑", "Ride"), "walk": ("走", "Walk"), "rest": ("休", "Rest"),
+}
+
+
+def _select_day(day):
+    st.session_state.selected_day = day
+    st.session_state.pop("training_action", None)
+    st.session_state.pop("training_move_preview", None)
+
+
+def _theme_name(theme):
+    if theme == "general":
+        return tr("全身基础", "Full-body basics")
+    if theme == "rest":
+        return tr("恢复休息日", "Recovery day")
+    return tr(*THEMES[theme])
+
+
+def _calendar_grid(profile, today, selected, dates, days, logs):
+    with st.container(key="training_calendar", gap="small"):
+        st.caption(f"{month_day(dates[0])} – {month_day(dates[-1])}")
+        labels = "".join(f"<span>{tr(*names)}</span>" for names in DAYS)
+        st.html(f'<div class="cal-weekdays">{labels}</div>')
+        for week in (0, 1):
+            with st.container(horizontal=True, key=f"cal_week_{week}"):
+                for day in dates[week * 7 : week * 7 + 7]:
+                    theme = training_theme(profile, day, days)
+                    tag = tr(*DAY_TAG[theme])
+                    tone = "rest" if theme == "rest" else "cardio" if theme in CARDIO else "strength"
+                    name = _theme_name(theme)
+                    if row := logs.get(day.isoformat()):
+                        missed = row["status"] == "missed"
+                        tag = tr("漏", "Miss") if missed else "✓"
+                        tone = "rest" if missed else "done"
+                        name += " · " + (tr("漏练", "Missed") if missed else tr("已打卡", "Logged"))
+                    marker = "_today" if day == today else ""
+                    marker += "_selected" if day == selected else ""
+                    description = f"{month_day(day)} · {name}"
+                    if day == today:
+                        description += tr(" · 今天", " · Today")
+                    if day == selected:
+                        description += tr(" · 已选", " · Selected")
+                    st.button(f"**{day.day}**  \n{tag} *{description}*", key=f"cal_day_{day}_{tone}{marker}",
+                              width="stretch", on_click=_select_day, args=(day,))
+
+
+
+def _move_options(profile, day, today, days, logs):
+    moving_out = day in days
+    if day < today or day.isoformat() in logs:
+        return []
+    choices = []
+    for i in range(14 - today.weekday()):
+        candidate = today + timedelta(days=i)
+        if candidate.isoformat() in logs or (candidate in days) == moving_out:
+            continue
+        origin, destination = (day, candidate) if moving_out else (candidate, day)
+        if valid_training_move(profile, origin, destination, days - {origin}):
+            choices.append((origin, destination))
+    return choices
+
+
+def _training_sources():
+    st.write(tr("同一重量下连续两次轻松完成目标，可增加一次重复。漏练后先减轻训练量；连续两次吃力或每第四周安排减量。重量参考你自己的记录。",
+                "After two comfortable completions at the same load, the plan can add one rep. A missed session eases you back in. Two difficult sessions or every fourth week reduce volume. Loads come from your log."))
+    st.markdown(tr("力量训练与有氧强度", "Strength and aerobic intensity") +
+                " · [ACSM](https://acsm.org/resistance-training-guidelines-update-2026/) · [CDC](https://www.cdc.gov/physical-activity-basics/measuring/) · [NHS](https://www.nhs.uk/live-well/exercise/strength-exercises/)")
+    st.markdown(tr("静息代谢、活动消耗与运动营养", "Resting energy, activity and nutrition") +
+                " · [Mifflin–St Jeor](https://pubmed.ncbi.nlm.nih.gov/2305711/) · [Cronometer](https://support.cronometer.com/hc/en-us/articles/31974307318420-Energy-Expenditure) · [NIH ODS](https://ods.od.nih.gov/factsheets/ExerciseandAthleticPerformance-HealthProfessional/)")
+
+
+def _focus_card(profile, today, day, days, logs, diary, db_path, eaten, incomplete):
+    plan = day_plan(profile, day, days)
+    theme = plan.theme if plan.training else "rest"
+    tone = "recovery" if theme == "rest" else "cardio" if theme in CARDIO else "strength"
+    existing = logs.get(day.isoformat(), {})
+    lang = tr("zh", "en")
+    session = session_for_day(profile, day, db_path=db_path, lang=lang)
+    with st.container(key="training_focus", gap="small"):
+        title = month_day(day) + (tr(" · 今天", " · Today") if day == today else "")
+        badge = escape(_theme_name(theme))
+        st.html(f'<div class="focus-heading"><h3>{escape(title)}</h3><span class="focus-badge {tone}">{badge}</span></div>')
+        st.caption(tr(f"参考 {span(plan.kcal)} kcal · 蛋白 {plan.protein_g} g · 碳水 {plan.carb_g} g · 脂肪 {plan.fat_g} g",
+                      f"{span(plan.kcal)} kcal · Protein {plan.protein_g} g · Carbs {plan.carb_g} g · Fat {plan.fat_g} g"))
+        if day == today and eaten is not None:
+            prefix = tr("已记小计", "Logged subtotal") if incomplete else tr("已记", "Logged")
+            st.caption(prefix + tr(f" {eaten['kcal']:.0f} kcal · 蛋白 {eaten['protein_g']:.0f} g · 碳水 {eaten['carb_g']:.0f} g · 脂肪 {eaten['fat_g']:.0f} g",
+                                   f" {eaten['kcal']:.0f} kcal · Protein {eaten['protein_g']:.0f} g · Carbs {eaten['carb_g']:.0f} g · Fat {eaten['fat_g']:.0f} g"))
+        if existing:
+            status = {"missed": ("漏练", "Missed"), "comfortable": ("✓ 顺利完成", "✓ Completed comfortably"),
+                      "challenging": ("✓ 已打卡 · 体感吃力", "✓ Logged · Challenging")}
+            st.markdown("**" + tr(*status[existing["status"]]) + "**")
+            if existing["actuals"]:
+                _actual_summary(existing, lang)
+        if theme == "rest":
+            st.write(tr(ACTIVITIES[profile.activity].recovery, ACTIVITY_EN[profile.activity].rest))
+        else:
+            lines = session_lines(session, lang)
+            st.caption(tr(f"本节约 {session['planned_minutes']} 分钟", f"About {session['planned_minutes']} min"))
+            if session["mode"] == "cardio":
+                parts = lines[1].split(" · ")
+            else:
+                parts = lines[1:]
+                if theme == "general":
+                    parts.insert(0, tr("热身 · 徒手浅蹲和轻松绕肩", "Warm-up · Mini squats and arm circles"))
+            rows = "".join(f"<li>{escape(line)}</li>" for line in parts)
+            st.html(f'<ul class="focus-exercises">{rows}</ul>')
+
+        preview = st.session_state.get("training_move_preview")
+        if preview and preview[0] == diary:
+            _review_date(profile, *preview[1:], db_path)
+            return
+        options = _move_options(profile, day, today, days, logs)
+        action = st.session_state.get("training_action")
+        with st.container(horizontal=True, gap="small"):
+            if day <= today and day in days:
+                label = tr("修改打卡", "Edit workout log") if existing else tr("✓ 完成打卡 / 记一组", "✓ Log workout / a set")
+                st.button(label, key="open_workout_log", type="primary", on_click=st.session_state.update,
+                          args=({"training_action": None if action == "log" else "log"},))
+            if options:
+                if day not in days:
+                    move = tr("把训练挪到这天", "Move a workout here")
+                elif day == today:
+                    move = tr("换一天练", "Change day")
+                else:
+                    move = tr("换到其他休息日", "Move to a rest day")
+                st.button(move, key="open_move_days", on_click=st.session_state.update,
+                          args=({"training_action": None if action == "move" else "move"},))
+        if action == "log" and day <= today and day in days:
+            _training_log_ui(profile, day, today, session, existing, db_path)
+        elif action == "move" and options:
+            st.caption(tr("选休息日", "Choose a rest day") if day in days else tr("选要移过来的训练", "Choose a workout"))
+            with st.container(horizontal=True, gap="xsmall", key="move_choices"):
+                for origin, destination in options:
+                    candidate = destination if day in days else origin
+                    label = month_day(candidate)
+                    if day not in days:
+                        label += " · " + _theme_name(training_theme(profile, origin, days))
+                    if st.button(label, key=f"move_option_{candidate}"):
+                        _preview_date(profile, origin, destination, days, diary)
+        elif day in days and day >= today and not existing and not options:
+            st.caption(tr("近期暂无符合安排的休息日。", "No available rest day fits this schedule."))
+
+
+def _dismiss_training_dialog():
+    st.session_state.pop("training_dialog", None)
+
+
+def training_plan(profile, today, days, db_path, *, eaten=None, incomplete=False):
+    diary = (str(db_path), st.session_state.get("diary_token"), today)
+    monday = today - timedelta(days=today.weekday())
+    dates = [monday + timedelta(days=i) for i in range(14)]
+    if st.session_state.get("calendar_diary") != diary:
+        st.session_state.calendar_diary = diary
+        _dismiss_training_dialog()
+        st.session_state.pop("offered_training_setup", None)
+        _select_day(today)
+    day = st.session_state.selected_day
+    logs = {r["date"]: r for r in read_logs(monday, today + timedelta(days=13), db_path=db_path)}
+    with st.container(horizontal=True, vertical_alignment="center", key="training_header"):
+        st.subheader(tr("训练安排", "Training schedule"))
+        settings_clicked = st.button(tr("⚙ 课表设置", "⚙ Schedule settings"), key="calendar_settings")
+    setup = st.session_state.pop("edit_training_setup", False) or settings_clicked
+    if not profile.training and not st.session_state.get("offered_training_setup"):
+        st.session_state.offered_training_setup = True
+        setup = True
+    _calendar_grid(profile, today, day, dates, days, logs)
+    _focus_card(profile, today, day, days, logs, diary, db_path, eaten, incomplete)
+    sources = tr("进度规则与文献依据", "Progression rules and sources")
+    if setup:
+        st.session_state.training_dialog = "setup"
+    if st.button(sources, type="tertiary", key="training_sources"):
+        st.session_state.training_dialog = "sources"
+    opened = st.session_state.get("training_dialog")
+    if opened == "sources":
+        st.dialog(sources, on_dismiss=_dismiss_training_dialog)(_training_sources)()
+    elif opened == "setup":
+        st.dialog(tr("课表设置", "Schedule settings"), on_dismiss=_dismiss_training_dialog)(_setup_form)(profile, today, db_path)
 
 
 def calendar_for_view(profile, today, db_path):
     last = today + timedelta(days=13)
-    return planned_days(profile, profile.week_start(today) - timedelta(days=1),
+    monday = today - timedelta(days=today.weekday())
+    return planned_days(profile, profile.week_start(monday) - timedelta(days=1),
                         profile.week_start(last) + timedelta(days=7), db_path=db_path)
 
 

@@ -79,10 +79,10 @@ SHORT_NAMES = {
     "fdc-2708407": ("加油白饭", "Seasoned white rice"),
     "fdc-2705933": ("烧鸡（带皮）", "Roast chicken with skin"),
     "fdc-2707132": ("清汤", "Clear broth"),
-    "fdc-2710375": ("黑咖啡", "Black coffee"),
+    "fdc-2710375": ("无糖黑咖啡 · Kopi O Kosong", "Kopi O Kosong · Black coffee"),
     "fdc-2705399": ("淡奶", "Evaporated milk"),
     "fdc-169655": ("白砂糖", "Sugar"),
-    "fdc-173227": ("无糖红茶", "Unsweetened black tea"),
+    "fdc-173227": ("无糖红茶 · Teh O Kosong", "Teh O Kosong · Unsweetened black tea"),
     "fdc-2705405": ("无糖豆浆", "Unsweetened soy milk"),
 }
 
@@ -99,7 +99,7 @@ def food_name(food):
 
 
 def source_name(label):
-    english = {"HPB · 新加坡": "Singapore HPB", "USDA · 膳食调查": "USDA · FNDDS",
+    english = {"USDA · 配方估算": "Recipe estimate · USDA", "HPB · 新加坡": "Singapore HPB", "USDA · 膳食调查": "USDA · FNDDS",
                "英国 CoFID": "UK CoFID", "台湾食药署": "Taiwan FDA",
                "FAO/INFOODS · 西非": "FAO/INFOODS · West Africa",
                "新加坡餐食实测": "Singapore meal study", "GYG · 澳大利亚菜单": "GYG · Australia"}

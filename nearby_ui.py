@@ -25,8 +25,8 @@ _LOCATION = st.components.v2.component(
     html="""<button type="button"></button><small aria-live="polite" role="status"></small>
     <style>
     button{font:600 .94rem/1.25 system-ui,sans-serif;min-height:44px;border-radius:.65rem;
-    background:var(--st-secondary-background-color, #edf1e5);color:var(--st-text-color, #234634);
-    border:1px solid #71927f;padding:.4rem .85rem;cursor:pointer}
+    background:var(--meal-soft, #F3F2EE);color:var(--st-text-color, #1B201E);
+    border:1px solid #D7D5CC;padding:.4rem .85rem;cursor:pointer}
     button:focus-visible{outline:3px solid #71927f;outline-offset:2px}
     small{display:block;font:.85rem/1.4 system-ui,sans-serif;margin-top:.25rem}
     small:empty{display:none}

@@ -22,7 +22,7 @@ from meals import (
 )
 from mobile_ui import apply_mobile_style, coverage_status, day_strip, diary_rhythm, meal_history, meal_time, saved_receipt
 from photo_tasks import start_recognition
-from plan_ui import calendar_for_view, day_summary, profile_form, settings, training_plan
+from plan_ui import calendar_for_view, profile_form, settings, training_plan
 from planning import day_plan
 from recognition import prepare_photo
 from sample_meal import start_practice
@@ -366,7 +366,10 @@ def main(*, public_demo=False):
         db_path, _ = start_practice(db_path, today)
     profile = get_profile(db_path=db_path)
     if notice := st.session_state.pop("notice", None):
-        st.info(notice)
+        if st.session_state.get("section") == "训练安排":
+            st.toast(notice)
+        else:
+            st.info(notice)
     if st.session_state.get("edit_profile"):
         profile_form(profile, today, db_path, public_demo)
         return
@@ -386,17 +389,15 @@ def main(*, public_demo=False):
     if section == "记餐":
         home(db_path, public_demo, today, profile, plan, eaten, records, partial_count, legacy_count)
     elif section == "训练安排":
-        training_plan(profile, today, days, db_path)
-        with st.expander(tr("今日目标明细", "Today's targets")):
-            day_summary(profile, today, plan, eaten, partial_count=partial_count, legacy_count=legacy_count)
+        training_plan(profile, today, days, db_path, eaten=eaten, incomplete=bool(partial_count or legacy_count))
     else:
         diary_rhythm(today, db_path=db_path)
         day = st.date_input(tr("用餐日期", "Meal date"), value=today, max_value=today)
         meal_history(records if day == today else list_meals(day, db_path=db_path), day=day, db_path=db_path)
-    if practice:
+    if practice and section != "训练安排":
         st.button(tr("结束试玩，回到我的日记", "Leave practice and return to my diary"), key="leave_practice",
                   on_click=_switch_practice, args=(False,))
-    elif section != "记餐" or not has_pending(db_path=db_path):
+    elif section == "日记" or (section == "记餐" and not has_pending(db_path=db_path)):
         settings(profile, db_path, public_demo)
     coach_entry(today, db_path, public_demo)
 

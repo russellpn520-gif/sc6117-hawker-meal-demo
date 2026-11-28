@@ -22,8 +22,7 @@ from pathlib import Path
 
 import streamlit as st
 from meals import get_profile
-from plan_ui import calendar_for_view, day_summary, profile_form, settings, training_plan
-from planning import day_plan
+from plan_ui import calendar_for_view, profile_form, settings, training_plan
 
 db = Path({str(self.db)!r})
 today = date.fromisoformat({self.today.isoformat()!r})
@@ -32,8 +31,7 @@ if st.session_state.get("view") == "calendar":
     days = calendar_for_view(profile, today, db)
     if notice := st.session_state.pop("notice", None):
         st.info(notice)
-    training_plan(profile, today, days, db)
-    day_summary(profile, today, day_plan(profile, today, days), {{"kcal": 105, "protein_g": 0.2}})
+    training_plan(profile, today, days, db, eaten={{"kcal": 105, "protein_g": 0.2, "carb_g": 21, "fat_g": 1}})
     settings(profile, db, public_demo=True)
 else:
     profile_form(profile, today, db, public_demo=False)
@@ -68,8 +66,8 @@ else:
         app.session_state["view"] = "calendar"
         app.run()
         self.assertFalse(app.exception)
-        move = next(b for b in app.button if b.label == "Move today’s workout to tomorrow")
-        move.click().run()
+        app.button(key="open_move_days").click().run()
+        app.button(key=f"move_option_{self.today + timedelta(days=1)}").click().run()
         profile = get_profile(db_path=self.db)
         tomorrow = self.today + timedelta(days=1)
         days = planned_days(profile, self.today, self.today + timedelta(days=13), db_path=self.db)
@@ -81,17 +79,17 @@ else:
         self.assertIn("up ", comparison)
         app.button(key="confirm_training_move").click().run()
         self.assertTrue(any("Workout moved from Nov 28 to Nov 29" in x.value for x in app.info))
-        self.assertTrue(any(comparison in x.value for x in app.info))
+        self.assertEqual(app.session_state.selected_day, tomorrow)
         profile = get_profile(db_path=self.db)
         self.assertEqual(profile.goal, "gain")
         self.assertEqual(planned_days(profile, self.today, self.today + timedelta(days=1), db_path=self.db),
                          {self.today + timedelta(days=1)})
         for element in [*app.markdown, *app.caption, *app.subheader, *app.info]:
             self.assertNotRegex(element.value, r"[\u4e00-\u9fff]")
-        self.assertEqual({e.label for e in app.metric}, {"Remaining today", "Protein remaining"})
+        self.assertTrue(any("Protein " in c.value and "Carbs " in c.value and "Fat " in c.value for c in app.caption))
         app.session_state["ui_lang"] = "zh"
         app.run()
-        self.assertTrue(any(b.label == "把明天的训练移到今天" for b in app.button))
+        self.assertTrue(any(b.label == "换到其他休息日" for b in app.button))
 
     def test_calendar_cross_week_preview_cancel_and_concurrent_move(self):
         profile = Profile(age=29, height_cm=170, weight_kg=64, activity="regular", start=self.today)
@@ -103,8 +101,9 @@ else:
         app.session_state["view"] = "calendar"
         app.run()
         for attempt in ("cancel", "stale"):
-            app.selectbox(key="reschedule_destination").select(alternative)
-            next(b for b in app.button if b.label == "预览改期").click().run()
+            if not any(b.key == f"move_option_{alternative}" for b in app.button):
+                app.button(key="open_move_days").click().run()
+            app.button(key=f"move_option_{alternative}").click().run()
             self.assertFalse(app.exception)
             expected = move_targets(profile, self.today, alternative, days)
             comparison = next(m.value for m in app.markdown if "减少 " in m.value)
@@ -134,8 +133,8 @@ else:
         app.session_state["view"] = "calendar"
         app.run()
         self.assertFalse(app.exception)
-        origins = app.selectbox(key="reschedule_origin")
-        self.assertEqual(origins.value, self.today + timedelta(days=7))
-        self.assertEqual(len(origins.options), 1)
+        self.assertFalse(any(b.key == "open_move_days" for b in app.button))
+        future = self.today + timedelta(days=7)
+        next(b for b in app.button if (b.key or "").startswith(f"cal_day_{future}_")).click().run()
         self.assertTrue(any("暂无符合" in c.value for c in app.caption))
-        self.assertFalse(any(b.label in ("把今天的训练移到明天", "预览改期", "确认改期") for b in app.button))
+        self.assertFalse(any(b.key == "open_move_days" for b in app.button))

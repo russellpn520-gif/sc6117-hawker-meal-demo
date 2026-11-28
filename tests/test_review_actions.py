@@ -6,10 +6,9 @@ from unittest.mock import patch
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from meal_drinks import add_drink, set_drink
-from meals import (SG_TIME, MealChangedError, create_pending, delete_meal, get_pending, list_meals,
+from meals import (SG_TIME, create_pending, delete_meal, get_pending, list_meals,
                    load_foods, make_draft, open_db, planned_days, portion_items, recent_activity,
-                   save_meal, save_profile, total_nutrients, update_review_foods)
+                   save_meal, save_profile, total_nutrients)
 from planning import Profile, TrainingPreferences
 from sample_meal import PHOTO
 from training_coach import save_training_preferences, split_exercises
@@ -95,40 +94,26 @@ def test_retake_opens_capture_even_with_another_draft_and_a_saved_meal(tmp_path)
         assert app.subheader[0].value == "Meal to confirm"
 
 
-def test_drink_can_also_be_removed_from_the_food_list(tmp_path):
-    db = tmp_path / "drink-row.db"
-    draft = make_ready(db, {"white-rice": 100})
+def test_legacy_cup_can_be_removed_and_restored_like_any_food(tmp_path):
+    db = tmp_path / "old-cup.db"
+    draft = make_draft("photo", "", {"white-rice": 100, "fdc-2710375": 200}, [])
+    draft.update(status="ready", quick_drinks=["kopi", "unknown"])
+    create_pending(draft, db_path=db)
     prefix = "meal-" + draft["id"]
     with patch("app.cloud_diary", return_value=db):
         app = AppTest.from_string("from app import main\nmain(public_demo=True)", default_timeout=20)
-        app.run().button(key=prefix + "-cup-kopi").click().run()
-        app.button(key=prefix + "-remove-fdc-2710375").click().run()
-        assert app.button(key=prefix + "-cup-kopi").label == "+ Kopi O Kosong"
-        app.button(key=prefix + "-cup-kopi").click().run()
+        app.run().button(key=prefix + "-remove-fdc-2710375").click().run()
+        assert not any("-cup-" in (b.key or "") for b in app.button)
+        app.button(key=prefix + "-undo-row").click().run()
         assert app.number_input(key=prefix + "-grams-fdc-2710375").value == 200
+        app.button(key=prefix + "-confirm").click().run()
+        assert not app.exception
 
 
-def test_drink_toggle_shares_ingredients_and_honours_adjusted_servings(tmp_path):
-    db = tmp_path / "cups.db"
-    coffee = "fdc-2710375"
-    draft = make_ready(db, {coffee: 60, "white-rice": 120})
-    key = draft["id"]
-    update_review_foods(key, "plate", {coffee: 47}, db_path=db)
-    assert add_drink(db, key, "kopi") and add_drink(db, key, "kopi_c")
-    assert not add_drink(db, key, "kopi")
-    assert set_drink(db, key, "kopi", added=False)
-    assert not set_drink(db, key, "kopi", added=False)
-    between = get_pending(key, db_path=db)
-    assert between["input"]["suggested_grams"][coffee] == 235
-    assert between["review_edits"]["plate"][coffee] == 222
-    assert between["quick_drinks"] == ["kopi_c"]
-    assert set_drink(db, key, "kopi_c", added=False)
-    final = get_pending(key, db_path=db)
-    assert final["input"]["suggested_grams"] == draft["input"]["suggested_grams"]
-    assert final["review_edits"]["plate"][coffee] == 47
-    assert not final["quick_drinks"]
-    with pytest.raises(MealChangedError):
-        save_meal(draft, portion_items(load_foods(), {"white-rice": 120}), db_path=db)
+def test_gym_push_has_lateral_raise_and_pull_keeps_face_pull():
+    push = split_exercises("gym", "push")
+    assert "cable_raise" in push and "face_pull" not in push
+    assert split_exercises("gym", "pull")[-1] == "face_pull"
 
 
 def test_delete_one_meal_recalculates_diary_and_blocks_old_pending(tmp_path):

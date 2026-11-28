@@ -4,8 +4,7 @@ from functools import partial
 import streamlit as st
 
 from i18n import food_name, source_name, tr
-from meal_drinks import DRINKS, available_drinks, set_drink
-from nutrition_coach import get_preferences
+from meal_drinks import LEGACY_CUP_FOODS
 from recognition import reviewable_photo
 from meals import allocate_grams, load_foods, portion_items, total_nutrients, update_pending_portion, update_review_foods
 
@@ -299,29 +298,6 @@ def _change_row(draft, view, db_path, food, weight, undo=False):
     _write_edits(draft, view, db_path, {food: weight if undo else 0})
 
 
-def _change_drink(draft, db_path, key, added):
-    if not set_drink(db_path, draft["id"], key, added=added):
-        st.session_state["cup_notice"] = draft["id"]
-
-
-def _drink_chips(draft, view, db_path):
-    allowed = available_drinks(get_preferences(db_path))
-    cups = draft.get("quick_drinks", ())
-    drinks = {k: d for k, d in DRINKS.items() if k in allowed or k in cups}
-    if not drinks:
-        return
-    st.caption(tr("水吧 · 顺手加一杯", "Drinks counter · Add a cup"))
-    with st.container(horizontal=True, gap="xsmall", key="hawker_drinks"):
-        for key, drink in drinks.items():
-            name = tr(*drink.names)
-            added = key in cups
-            st.button(f"✓ {name} ×" if added else f"+ {name}", key=f"{view}-cup-{key}",
-                      on_click=_change_drink, args=(draft, db_path, key, not added))
-    if st.session_state.pop("cup_notice", None) == draft["id"]:
-        st.caption(tr("草稿已刷新，请核对饮品和份量（每项最多 3,000 g）。",
-                      "Draft refreshed. Check the drinks and servings (up to 3,000 g per item)."))
-
-
 def _correct_foods(panel, foods, original, view, draft, db_path):
     suggested = original["suggested_grams"]
     edits = (draft.get("review_edits", {}).get(view, {}) if "captured_at" in draft
@@ -351,7 +327,8 @@ def _correct_foods(panel, foods, original, view, draft, db_path):
         st.session_state[stable] = list(selected)
         if query.strip() and not matches:
             st.caption(tr("没有搜到，可以换个名字或搜一种配料。", "No matches. Try a different name or ingredient."))
-        drink_foods = {food for cup in draft.get("quick_drinks", ()) if cup in DRINKS for food in DRINKS[cup].portions}
+        drink_foods = {food for cup in (draft.get("quick_drinks") or ()) if isinstance(cup, str)
+                      for food in LEGACY_CUP_FOODS.get(cup, ())}
         ranges = {k: v for k, v in original.get("portion_ranges", {}).items() if k not in drink_foods}
         if any(ranges.get(key) for key in selected):
             sizes = {k: tr(k, v) for k, v in (("偏小", "Smaller"), ("按照片估计", "Estimate"), ("偏大", "Larger"))}
@@ -394,7 +371,6 @@ def review_meal(draft, db_path=None, status_slot=None):
     repair_area = st.container()
     summary = st.container(key="review_summary")
     action = st.container()
-    drinks_area = st.container()
     editor = st.expander(tr("有剩饭，或想改菜名 / 克数", "Leftovers or changes to foods / grams"))
     leftovers = editor.container()
     corrections = editor.container()
@@ -422,9 +398,6 @@ def review_meal(draft, db_path=None, status_slot=None):
     rows = _missing_items(original, foods)
     corrections.caption(tr("搜菜 / 改克数", "Find foods / edit grams"))
     weights = _correct_foods(corrections, foods, original, view, draft, db_path)
-    if "captured_at" in draft:
-        with drinks_area:
-            _drink_chips(draft, view, db_path)
     # Deselecting a whole-dish replacement reopens that group for review.
     dropped = [d for d in main_decisions if d["food_id"] not in weights]
     if dropped:
@@ -478,24 +451,14 @@ def review_meal(draft, db_path=None, status_slot=None):
             else:
                 st.warning(tr(f"还有 {len(pending)} 项未计入 · ", f"Foods still missing ({len(pending)}) · ") + display_names)
         calories = {i["food_id"]: i["nutrients"]["kcal"] for i in items}
-        cups = [cup for cup in draft.get("quick_drinks", ()) if cup in DRINKS]
         for key, served in weights.items():
             name = food_name(foods[key])
-            # A standalone counter drink has the same remove action in its row
-            # and its chip. A shared ingredient remains a food-level edit.
-            owners = [cup for cup in cups if key in DRINKS[cup].portions]
-            cup = owners[0] if len(owners) == 1 else None
-            standalone = (cup and len(DRINKS[cup].portions) == 1
-                          and served == original["suggested_grams"].get(key) == DRINKS[cup].portions[key])
-            if standalone:
-                name = tr(*DRINKS[cup].names)
             grams = consumed[key]
             amount = f"{grams} g" if grams == served else tr(f"实吃 {grams}/{served} g", f"Ate {grams}/{served} g")
             with st.container(horizontal=True, vertical_alignment="center", gap="xsmall", key=f"review_row_{key}"):
                 st.markdown(f"{name} · {amount} · " + tr(f"约 {calories.get(key, 0):.0f} kcal", f"~{calories.get(key, 0):.0f} kcal"))
                 st.button("×", key=f"{view}-remove-{key}", help=tr(f"移除{name}", f"Remove {name}"),
-                          on_click=_change_drink if standalone else _change_row,
-                          args=(draft, db_path, cup, False) if standalone else (draft, view, db_path, key, served))
+                          on_click=_change_row, args=(draft, view, db_path, key, served))
         removed = st.session_state.get(view + "-undo", {})
         undo = next((k for k in reversed(removed) if k not in weights), None)
         if undo:

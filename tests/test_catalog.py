@@ -19,7 +19,7 @@ class FoodCatalogTests(unittest.TestCase):
 
     def test_global_sources_and_per_100_vs_per_serving(self):
         self.assertGreater(len(self.foods), 19000)
-        self.assertEqual(set(self.foods.counts), {"sr","fndds","cofid","tfda","wafct","sgstudy","hpb","gyg-au"})
+        self.assertEqual(set(self.foods.counts), {"sr","fndds","cofid","tfda","wafct","sgstudy","hpb","gyg-au","recipe"})
         for query in ("鹰嘴豆泥", "ceviche", "burrito bowl", "英吉拉", "kimchi", "可颂", "couscous", "嫩豆腐"):
             self.assertIsNotNone(self.foods.exact_food(query), query)
         for query in ("Jollof", "GYG", "沙拉", "paneer", "pasta"):

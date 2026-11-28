@@ -6,7 +6,7 @@ from datetime import date, timedelta
 from math import isfinite
 
 from meals import _planned_days, open_db, planned_days
-from planning import ACTIVITIES, CARDIO, THEMES, Profile, training_theme, valid_training_move
+from planning import ACTIVITIES, CARDIO, THEMES, Profile, TrainingPreferences, training_theme, valid_training_move
 
 
 EXERCISES = {
@@ -37,7 +37,7 @@ MOVEMENTS = {
         "chest": ("bench|杠铃卧推|Barbell bench press", "incline|上斜器械推胸|Incline machine press", "pec|蝴蝶机夹胸|Pec deck fly"),
         "back": ("pulldown|高位下拉|Lat pulldown", "row|坐姿绳索划船|Seated cable row", "cable_curl|绳索弯举|Cable curl"),
         "rear_delt": ("face_pull|绳索面拉|Cable face pull",),
-        "shoulder": ("machine_press|器械肩推|Machine shoulder press", "face_pull|绳索面拉|Cable face pull", "cable_raise|绳索侧平举|Cable lateral raise"),
+        "shoulder": ("machine_press|器械肩推|Machine shoulder press", "cable_raise|绳索侧平举|Cable lateral raise", "face_pull|绳索面拉|Cable face pull"),
         "legs": ("leg_press|腿举|Leg press", "leg_curl|坐姿腿弯举|Seated leg curl", "hip_thrust|器械臀推|Machine hip thrust"),
         "core": ("pallof|绳索抗旋推|Pallof press", "cable_chop|绳索伐木|Cable chop", "crunch|跪姿绳索卷腹|Kneeling cable crunch"),
     },
@@ -221,6 +221,20 @@ def _session(profile, day, active, history, lang):
             "walk_minutes": max(0, finish_walk), "planned_minutes": working_minutes + max(0, finish_walk)}
 
 
+def session_for_day(profile, day, *, db_path=None, lang="zh"):
+    """Render and log the same session, including a pre-setup bodyweight day."""
+    prefs = profile.training_for(day) or TrainingPreferences(weekdays=tuple(range(7)), since=profile.start)
+    active = planned_days(profile, day, day, db_path=db_path)
+    history = read_logs(prefs.since, day, db_path=db_path)
+    session = _session(profile.model_copy(update={"training": prefs}), day, active, history, lang)
+    # A library update must not silently discard exercises from an existing log.
+    logged = next((r for r in reversed(history) if r["date"] == day.isoformat()), None)
+    if logged and session["mode"] not in {"rest", "cardio"} and logged["targets"]:
+        session["exercises"] = [{"id": k, "name": EXERCISES[k][lang == "en"], **target}
+                                for k, target in logged["targets"].items() if k in EXERCISES]
+    return session
+
+
 def training_context(profile, today, *, db_path=None, lang="zh"):
     if not profile or not profile.training_for(today):
         return {"configured": False, "next_step": "training_setup", "sessions": [], "recent_logs": []}
@@ -302,11 +316,11 @@ def training_reply(profile, day, *, db_path=None, lang="zh"):
 
 
 def save_training_log(profile, day, today, status, actuals, *, db_path=None):
-    if day > today or not profile.training_for(day):
+    if day > today or day < profile.start:
         raise ValueError("date")
     if status not in {"missed", "comfortable", "challenging"}:
         raise ValueError("status")
-    session = training_context(profile, day, db_path=db_path)["sessions"][0]
+    session = session_for_day(profile, day, db_path=db_path)
     if session["mode"] == "rest":
         raise ValueError("rest")
     targets = {e["id"]: {"sets": e["sets"], "reps": e["reps"], "kg": e["kg"]} for e in session["exercises"]}
