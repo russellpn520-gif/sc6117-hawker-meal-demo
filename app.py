@@ -119,7 +119,7 @@ def _discard_review(draft, db_path, *, retake=False):
         st.session_state.retaking = True
         st.session_state.capture_mode = "label" if draft["input"]["method"] == "label" else "photo"
         if st.session_state.get("practice_mode"):
-            _switch_practice(False, rerun=False)
+            _switch_practice(False)
     else:
         st.session_state.notice = tr("草稿已移除。", "Draft removed.")
 
@@ -216,16 +216,20 @@ def draft_label(draft, *, time_only=False):
 def meal_entry(db_path, public_demo):
     if not st.session_state.get("practice_mode"):
         capture_meal(db_path, public_demo)
-        if st.button(tr("用示例鸡饭试走一遍", "Try with a sample chicken rice photo"),
-                     key="sample_chicken", width="stretch"):
-            _, key = start_practice(db_path, datetime.now(SG_TIME).date(), restart=True)
-            _switch_practice(True, key)
+        st.button(tr("用示例鸡饭试走一遍", "Try with a sample chicken rice photo"),
+                  key="sample_chicken", width="stretch", on_click=_enter_sample, args=(db_path,))
     with st.expander(tr("按菜名记餐", "Log by food name")):
         text_entry(db_path)
     usual_meals_ui(db_path)
 
 
-def _switch_practice(enabled, draft_id=None, *, rerun=True):
+def _enter_sample(db_path):
+    _, key = start_practice(db_path, datetime.now(SG_TIME).date(), restart=True)
+    _switch_practice(True, key)
+
+
+def _switch_practice(enabled, draft_id=None):
+    st.session_state.practice_mode = enabled
     st.session_state.section = "记餐"
     for key in ("active_draft", "receipt", "mituan_state", "edit_profile", "edit_training_setup",
                 "training_move_preview", "notice"):
@@ -233,12 +237,6 @@ def _switch_practice(enabled, draft_id=None, *, rerun=True):
     if draft_id:
         st.session_state.pop("retaking", None)
         st.session_state.active_draft = draft_id
-    if enabled:
-        st.query_params["practice"] = "1"
-    elif "practice" in st.query_params:
-        del st.query_params["practice"]
-    if rerun:
-        st.rerun()
 
 
 def next_meal_due(records, now):
@@ -355,8 +353,15 @@ def main(*, public_demo=False):
         title.title(tr("食阁记餐", "Meal Diary"))
     db_path = cloud_diary() if public_demo else None
     today = datetime.now(SG_TIME).date()
-    practice = st.query_params.get("practice") == "1"
-    st.session_state.practice_mode = practice
+    # A fresh tab resumes the URL. In a running tab a delayed iframe URL
+    # update must not undo the user's latest tap on Retake or Leave practice.
+    from_link = st.query_params.get("practice") == "1"
+    practice = st.session_state.setdefault("practice_mode", from_link)
+    if practice != from_link:
+        if practice:
+            st.query_params["practice"] = "1"
+        else:
+            del st.query_params["practice"]
     if practice:
         db_path, _ = start_practice(db_path, today)
     profile = get_profile(db_path=db_path)
@@ -389,8 +394,8 @@ def main(*, public_demo=False):
         day = st.date_input(tr("用餐日期", "Meal date"), value=today, max_value=today)
         meal_history(records if day == today else list_meals(day, db_path=db_path), day=day, db_path=db_path)
     if practice:
-        if st.button(tr("结束试玩，回到我的日记", "Leave practice and return to my diary"), key="leave_practice"):
-            _switch_practice(False)
+        st.button(tr("结束试玩，回到我的日记", "Leave practice and return to my diary"), key="leave_practice",
+                  on_click=_switch_practice, args=(False,))
     elif section != "记餐" or not has_pending(db_path=db_path):
         settings(profile, db_path, public_demo)
     coach_entry(today, db_path, public_demo)

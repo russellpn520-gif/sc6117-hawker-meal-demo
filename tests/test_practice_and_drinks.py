@@ -46,6 +46,11 @@ class PracticeAndDrinksTests(unittest.TestCase):
             self.assertTrue(record["has_thumbnail"])
             ui.button(key="leave_practice").click().run()
             self.assertTrue(ui.button(key="sample_chicken"))
+            # The outer Cloud frame can still send the previous URL on the next rerun.
+            ui.query_params["practice"] = "1"
+            ui.run()
+            self.assertTrue(ui.button(key="sample_chicken"))
+            self.assertNotIn("practice", ui.query_params)
             self.assertIsNone(get_profile(db_path=self.diary))
             self.assertEqual(list_meals(self.today, db_path=self.diary), [])
 
