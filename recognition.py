@@ -241,8 +241,9 @@ def _recover_bilingual_components(draft):
             seen = VisibleFood(english=row["name_en"], chinese=row["name"],
                                low_g=row.get("low_g", 0), high_g=row.get("high_g", 0))
             food_id = match_visible(seen, foods)
-            if ingredients and key[2]:
-                ingredient_groups.setdefault(key[1], set()).add(food_id)
+            mixed_dressing = mixed_soy_ginger_sauce(seen.english, seen.chinese)
+            if ingredients and key[2] and (food_id or mixed_dressing):
+                ingredient_groups.setdefault(key[1], set()).add(food_id or "dressing")
             # Only newly understood preparations are safe to add automatically.
             # E.g. the plain/oiled rice question still needs its explicit answer.
             if food_id in {"boiled-chicken", "white-rice", "fdc-2707132", "fdc-2709593", "tfda-P0200601"}:
@@ -255,7 +256,7 @@ def _recover_bilingual_components(draft):
                     grams[food_id] = grams.get(food_id, 0) + amount
                     changed = True
                     continue
-            if row.get("alternatives") and mixed_soy_ginger_sauce(seen.english, seen.chinese):
+            if row.get("alternatives") and mixed_dressing:
                 row = {**row, "alternatives": []}
                 changed = True
             remaining.append(row)
@@ -271,8 +272,10 @@ def _recover_bilingual_components(draft):
 
     updated = {name: rematch(view, ingredients=name == "按配料") for name, view in variants.items()}
     whole = variants.get("整道菜", original)
+    unresolved_wholes = {row["key"] for row in whole.get("missing_items", ())}
     mixed_chicken = ("boiled-chicken" in whole.get("suggested_grams", {})
-                     and any("boiled-chicken" in group and len(group) > 1 for group in ingredient_groups.values()))
+                     and any(index not in unresolved_wholes and "boiled-chicken" in group and len(group) > 1
+                             for index, group in ingredient_groups.items()))
     if mixed_chicken:
         # The v2 whole view combined the weight of the meat with its sides.
         # Group-specific rows survive only in the ingredient view.
