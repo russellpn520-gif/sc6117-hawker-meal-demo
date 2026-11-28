@@ -1,7 +1,7 @@
 import unittest
 
 from catalog import load_foods
-from recognition import Dish, MealPhoto, VisibleFood, resolve_photo, reviewable_photo
+from recognition import BilingualMealPhoto, Dish, MealPhoto, VisibleFood, resolve_photo, reviewable_photo
 
 
 def item(english, chinese, low, high):
@@ -116,3 +116,50 @@ class PartialPhotoTests(unittest.TestCase):
         soup = Dish(whole=item("clear broth", "清汤", 150, 210), parts=[])
         view = self.scan(plate, soup)["input"]
         self.assertEqual(view["suggested_grams"], {"chicken-rice-plate": 350, "fdc-2707132": 180})
+
+    def test_bilingual_chicken_plate_and_recovery_of_the_same_v2_draft(self):
+        chicken = item("Poached chicken breast/thigh (sliced)", "白切鸡肉（切片）", 80, 110)
+        sauce = item("Light soy/ginger sauce", "清淡酱汁（酱油/姜油）", 4, 10)
+        greens = item("Blanched leafy greens (gai lan / Chinese broccoli style)", "青菜（类似芥兰）", 40, 70)
+        shallots = item("Fried shallot garnish", "炸葱酥", 3, 7)
+        rice = item("Plain cooked white rice", "白米饭（蒸）", 165, 225)
+        broth = item("Clear broth with cilantro/scallion", "清汤（带香菜/葱）", 150, 230)
+        bowl = item("Clear soup (small bowl)", "清汤（小碗）", 150, 230)
+        plate = Dish(whole=item("Chicken meat, boiled", "白切鸡", 155, 185), parts=[chicken, sauce, greens, shallots])
+        scan = BilingualMealPhoto(dishes=[plate, Dish(whole=rice, parts=[rice]), Dish(whole=bowl, parts=[broth])],
+                                  uncertain_items=["酱汁用油量不明。"], uncertain_items_en=["Oil in the dressing is uncertain."],
+                                  portion_note="根据餐盘大小估算。", portion_note_en="Estimated from the plates.")
+        fresh = resolve_photo(scan, self.foods, "Meal photo")
+        def old_row(identifier, seen):
+            return {"key": identifier, "name": seen.chinese, "name_en": seen.english,
+                    "low_g": seen.low_g, "high_g": seen.high_g,
+                    "alternatives": ["fdc-2707442"] if seen == sauce else []}
+        old_whole = {"suggested_grams": {"boiled-chicken": 170, "white-rice": 195},
+                     "portion_ranges": {"boiled-chicken": [155, 185], "white-rice": [165, 225]},
+                     "missing_items": [old_row("d2", bowl)]}
+        old_parts = {"suggested_grams": {}, "portion_ranges": {}, "uncertain_items": scan.uncertain_items,
+                     "uncertain_items_en": scan.uncertain_items_en,
+                     "missing_items": [old_row(f"d{i}-p{j}", part) for i, dish in enumerate(scan.dishes)
+                                       for j, part in enumerate(dish.parts)]}
+        saved = {"id": "existing", "status": "ready", "input": {**old_whole, "method": "photo",
+                 "photo_resolution_version": 2, "token_usage": {"total_tokens": 2406}},
+                 "variants": {"整道菜": old_whole, "按配料": old_parts}}
+        recovered = reviewable_photo(saved)
+        self.assertEqual(recovered["input"]["token_usage"], {"total_tokens": 2406})
+        for draft in (fresh, recovered):
+            view = draft["input"]
+            self.assertFalse(draft.get("variants"))
+            self.assertEqual(view["suggested_grams"], {"boiled-chicken": 95, "fdc-2709593": 55, "tfda-P0200601": 5,
+                                                       "white-rice": 195, "fdc-2707132": 190})
+            self.assertEqual(view["portion_ranges"]["boiled-chicken"], [80, 110])
+            self.assertEqual(view["unmatched_foods_en"], ["Light soy/ginger sauce"])
+            row, = view["missing_items"]
+            self.assertEqual((row["key"], row["low_g"], row["high_g"], row["alternatives"]), ("d0-p1", 4, 10, []))
+            self.assertEqual(view["uncertain_items_en"], scan.uncertain_items_en)
+            self.assertEqual(view["photo_resolution_version"], 3)
+            self.assertIs(reviewable_photo(draft), draft)
+
+    def test_photo_qualifiers_do_not_remove_additional_ingredients(self):
+        self.assertIsNone(self.foods.photo_match("clear broth with noodles", "清汤面配肉"))
+        self.assertIsNone(self.foods.photo_match("blanched greens with oyster sauce", "蚝油芥兰"))
+        self.assertIsNone(self.foods.photo_match("soy ginger dressing", "酱油"))

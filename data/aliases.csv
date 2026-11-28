@@ -1,11 +1,12 @@
 food_id,name,aliases
 chicken-rice-plate,鸡饭（整盘）,海南鸡饭套餐|海南鸡饭整盘|白切鸡饭|海南鸡肉饭|Hainanese chicken rice|Hainan chicken rice|Hainanese chicken rice set|chicken rice plate
-white-rice,白饭,熟米饭|熟白米饭|白米饭|蒸米饭|蒸白饭|蒸白米饭|steamed rice|steamed white rice|cooked white rice|plain white rice|white rice cooked|cooked rice
+white-rice,白饭,熟米饭|熟白米饭|白米饭|白米饭（蒸）|蒸米饭|蒸白饭|蒸白米饭|steamed rice|steamed white rice|cooked white rice|plain cooked white rice|plain white rice|white rice cooked|cooked rice
 boiled-chicken,水煮鸡,白切鸡肉|白斩鸡|白斩鸡肉|白切鸡片|水煮鸡片|白切雞肉|poached chicken|sliced poached chicken|white cut chicken
 fdc-2708407,加油白米饭（油脂种类未指定）,鸡油饭|鸡油米饭|加油煮的米饭|chicken fat rice
 fdc-2709593,水煮绿叶菜（未加油）,焯青菜|焯水青菜|白灼青菜|焯绿叶菜|水煮绿叶菜|blanched leafy greens|blanched greens|boiled leafy greens
 fdc-2707132,清汤（通用参考）,清汤|清湯|清汤汤底|clear broth|clear soup|plain broth
 fdc-2709784,鲜黄瓜,黄瓜片|鲜黄瓜片|生黄瓜片|青瓜片|小黄瓜片|黃瓜片|cucumber slices|sliced cucumber|raw cucumber slices
+tfda-P0200601,油葱酥,炸葱酥|炸红葱酥|fried shallot garnish|fried shallots garnish|crispy fried shallots
 fdc-2708555,墨西哥碗（通用参考）,墨西哥碗|墨西哥饭碗|墨西哥卷碗|墨西哥饭|burrito bowl|Mexican rice bowl|Mexican bowl|GYG burrito bowl|Guzman y Gomez burrito bowl|GYG墨西哥碗
 fdc-2708556,牛肉或猪肉墨西哥碗,beef burrito bowl|pork burrito bowl|牛肉碗|牛肉墨西哥碗
 fdc-2708557,牛肉或猪肉墨西哥碗（米饭）,beef burrito bowl with rice|牛肉墨西哥饭碗

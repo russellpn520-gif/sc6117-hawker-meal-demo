@@ -101,6 +101,7 @@ def is_soup(seen, food_id=None):
 
 def resolve_photo(result, foods, filename):
     groups = []
+    embedded_broth = False
     stock_uncertain = any("饭" in line and re.search("鸡汤|鸡油|油饭|加油", line)
                           and re.search("不确定|无法|难以|是否|不明|不清楚|可能", line)
                           for line in result.uncertain_items)
@@ -121,7 +122,7 @@ def resolve_photo(result, foods, filename):
                      if k in RICE_REFERENCES), None)
                 if key is None:
                     part = part.model_copy(update={"chinese": RICE_PREPARATION_UNKNOWN})
-            elif key and key == whole_key and len(dish.parts) > 1:
+            elif key and key == whole_key and key != "boiled-chicken" and len(dish.parts) > 1:
                 # E.g. an English "chicken rice" for the flavoured rice part
                 # must not count the entire chicken plate next to its chicken.
                 english = foods.exact_food(part.english)
@@ -141,7 +142,12 @@ def resolve_photo(result, foods, filename):
         # The chicken-rice references cover the plate of rice and chicken.
         # If the model weighs a tray including broth, applying the plate's
         # energy density to that weight would count the broth as rice/chicken.
-        parts_only = chicken_rice and any(is_soup(p, k) for k, p in parts)
+        tray_with_soup = chicken_rice and any(is_soup(p, k) for k, p in parts)
+        embedded_broth |= tray_with_soup
+        # The plain meat reference covers no side vegetables or dressing.
+        # Use the photographed weight of the chicken pieces within this plate.
+        chicken_with_sides = whole_key == "boiled-chicken" and any(k != whole_key for k, _ in parts)
+        parts_only = tray_with_soup or chicken_with_sides
         groups.append(((whole_key, dish.whole), parts, parts_only))
 
     def variant(by_parts):
@@ -175,7 +181,10 @@ def resolve_photo(result, foods, filename):
                     ranges[key] = None
                 grams[key] = sum_g
             same_food = len(parts) == 1 and whole[0] and parts[0][0] == whole[0]
-            if using_parts and not same_food and component_gap(whole[1], parts):
+            missing_chicken = (parts_only and whole[0] == "boiled-chicken"
+                               and not any(k == whole[0] or "鸡" in p.chinese or "chicken" in p.english.casefold()
+                                           for k, p in parts))
+            if using_parts and not same_food and (missing_chicken or component_gap(whole[1], parts)):
                 # Never suggest adding an entire dish on top of its ingredients.
                 # The separate whole-dish view can replace all components at once.
                 missing.append({"key": f"d{index}-gap", "name": f"{whole[1].chinese or whole[1].english}（未覆盖的配料）",
@@ -200,21 +209,89 @@ def resolve_photo(result, foods, filename):
     draft = make_draft("photo", filename, first["suggested_grams"], first["unmatched"])
     portion_note = result.portion_note
     portion_note_en = getattr(result, "portion_note_en", "")
-    if any(forced for _, _, forced in groups):
+    if embedded_broth:
         portion_note += " 鸡饭和汤按各自的份量分别查表。"
         portion_note_en += " Chicken rice and soup are estimated separately."
     draft["input"].update(first, portion_note=portion_note.strip(), portion_note_en=portion_note_en.strip(),
-                          photo_resolution_version=2)
+                          photo_resolution_version=3)
     if parts != whole:
         draft["variants"] = variants
     return draft
 
 
+def _recover_bilingual_components(draft):
+    """Version 2 retained the bilingual descriptions, group IDs and portions of unresolved foods."""
+    from catalog import load_foods, mixed_soy_ginger_sauce
+
+    foods = load_foods()
+    original = draft["input"]
+    variants = draft.get("variants", {})
+    ingredient_groups = {}
+
+    def rematch(view, *, ingredients=False):
+        grams = dict(view.get("suggested_grams", {}))
+        ranges = dict(view.get("portion_ranges", {}))
+        remaining = []
+        changed = False
+        for row in view.get("missing_items", ()):
+            key = re.fullmatch(r"(d\d+)(-p\d+)?", row["key"])
+            if not key or not row.get("name_en") or row["name"] == RICE_PREPARATION_UNKNOWN:
+                remaining.append(row)
+                continue
+            seen = VisibleFood(english=row["name_en"], chinese=row["name"],
+                               low_g=row.get("low_g", 0), high_g=row.get("high_g", 0))
+            food_id = match_visible(seen, foods)
+            if ingredients and key[2]:
+                ingredient_groups.setdefault(key[1], set()).add(food_id)
+            # Only newly understood preparations are safe to add automatically.
+            # E.g. the plain/oiled rice question still needs its explicit answer.
+            if food_id in {"boiled-chicken", "white-rice", "fdc-2707132", "fdc-2709593", "tfda-P0200601"}:
+                amount, bounds = portion_guess(foods[food_id], seen)
+                if bounds and grams.get(food_id, 0) + amount <= 3000:
+                    if food_id not in grams:
+                        ranges[food_id] = bounds
+                    elif ranges.get(food_id):
+                        ranges[food_id] = [min(3000, a + b) for a, b in zip(ranges[food_id], bounds)]
+                    grams[food_id] = grams.get(food_id, 0) + amount
+                    changed = True
+                    continue
+            if row.get("alternatives") and mixed_soy_ginger_sauce(seen.english, seen.chinese):
+                row = {**row, "alternatives": []}
+                changed = True
+            remaining.append(row)
+        if not changed:
+            return view
+        update = {**view, "suggested_grams": grams, "portion_ranges": ranges, "missing_items": remaining,
+                  "alternatives": list(dict.fromkeys(k for row in remaining for k in row.get("alternatives", [])))}
+        for suffix in ("", "_en"):
+            names = list(dict.fromkeys(row.get("name" + suffix) or row["name"] for row in remaining))
+            update["unmatched_foods" + suffix] = names
+            update["unmatched" + suffix] = list(dict.fromkeys([*view.get("uncertain_items" + suffix, []), *names]))
+        return update
+
+    updated = {name: rematch(view, ingredients=name == "按配料") for name, view in variants.items()}
+    whole = variants.get("整道菜", original)
+    mixed_chicken = ("boiled-chicken" in whole.get("suggested_grams", {})
+                     and any("boiled-chicken" in group and len(group) > 1 for group in ingredient_groups.values()))
+    if mixed_chicken:
+        # The v2 whole view combined the weight of the meat with its sides.
+        # Group-specific rows survive only in the ingredient view.
+        current = updated["按配料"]
+        updated = {}
+    else:
+        current = next(iter(updated.values())) if updated else rematch(original)
+        if all(updated[n] is v for n, v in variants.items()) and (variants or current is original):
+            return draft
+    return {**draft, "variants": updated, "input": {**original, **current, "photo_resolution_version": 3}}
+
+
 def reviewable_photo(draft):
     """Repair older pending tray estimates from their stored components, without another photo call."""
     original = draft["input"]
-    if original.get("method") != "photo" or original.get("photo_resolution_version", 0) >= 2:
+    if original.get("method") != "photo" or original.get("photo_resolution_version", 0) >= 3:
         return draft
+    if original.get("photo_resolution_version") == 2:
+        return _recover_bilingual_components(draft)
     variants = draft.get("variants", {})
     whole = variants.get("整道菜", original)
     ingredients = variants.get("按配料", {})

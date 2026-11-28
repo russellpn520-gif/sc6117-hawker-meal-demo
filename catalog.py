@@ -67,6 +67,29 @@ def terms(text):
     return result
 
 
+def mixed_soy_ginger_sauce(english, chinese):
+    return (("酱油" in chinese and "姜油" in chinese)
+            or bool(re.search(r"\bsoy\b.*\bginger\b|\bginger\b.*\bsoy\b", english, flags=re.I))
+            and bool(re.search(r"\b(?:sauce|dressing|oil)\b", english, flags=re.I)))
+
+
+# These descriptions add a serving vessel, garnish, shape or uncertain variety.
+# Restrict the allowed qualifiers so a sauce or oil cannot be silently stripped.
+def prepared_photo_reference(english, chinese):
+    en, zh = normalize(english), normalize(chinese)
+    herbs = r"(?:cilantro|coriander|scallions?|spring onions?)"
+    if (re.fullmatch(r"(?:clear soup|clear broth)(?: (?:small|medium|large) bowl| with " + herbs
+                     + r"(?:(?: and | )" + herbs + r")*)?", en)
+            or re.fullmatch(r"清汤 (?:小碗|中碗|大碗|(?:带|加)?(?:香菜|葱花?|芫荽)(?: (?:香菜|葱花?|芫荽))*)", zh)):
+        return "fdc-2707132"
+    if re.fullmatch(r"(?:blanched|boiled) (?:leafy greens|greens)(?: (?:gai lan|chinese broccoli|style|like))*", en):
+        if not re.search(r"炒|酱|酥|油|汁", zh):
+            return "fdc-2709593"
+    if re.fullmatch(r"(?:poached|boiled) chicken (?:breast thigh|breast or thigh)(?: sliced)?", en):
+        return "boiled-chicken"
+    return None
+
+
 class Catalog(dict):
     def __init__(self, foods, featured):
         super().__init__((f.food_id, f) for f in foods)
@@ -96,6 +119,8 @@ class Catalog(dict):
     def photo_match(self, english, chinese):
         # Prefer a curated exact local name to incidental synonyms in source
         # tables (including animal and produce names that share a translation).
+        if mixed_soy_ginger_sauce(english, chinese):
+            return None
         local = self.exact_food(chinese)
         if local in self.featured:
             return local
@@ -109,6 +134,8 @@ class Catalog(dict):
             key = self.exact_food(base)
             if key in self.featured:
                 return key
+        if key := prepared_photo_reference(english, chinese):
+            return key
         # Reordered names are fine. A different variety, cooking method or
         # ingredient changes the reference and needs the diner's confirmation.
         query = terms(normalize(english))
@@ -128,6 +155,8 @@ class Catalog(dict):
 
     def photo_suggestions(self, english, chinese):
         """Short, user-confirmed alternatives, without unrelated search hits."""
+        if mixed_soy_ginger_sauce(english, chinese):
+            return []
         if direct := self.photo_match(english, chinese):
             return [direct]
         if chinese.strip() in {"酱油汁", "醬油汁"}:

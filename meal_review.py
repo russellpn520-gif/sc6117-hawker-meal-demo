@@ -97,7 +97,8 @@ def _repair_controls(panel, view, rows, foods, selected):
                 if query.strip():
                     matches = foods.search(query)
                     if matches:
-                        k = st.selectbox(tr("选择对应项", "Choose a matching food"), matches, format_func=lambda k: f"{food_name(foods[k])} · {source_name(foods[k].source_label)}",
+                        labels = {k: f"{food_name(foods[k])} · {source_name(foods[k].source_label)}" for k in matches}
+                        k = st.selectbox(tr("选择对应项", "Choose a matching food"), matches, format_func=labels.__getitem__,
                                          key=f"{controls}-replacement")
                         st.button(tr("用这项补记", "Use this food"), key=f"{controls}-use", on_click=_resolve_food,
                                   args=(view, row, k, foods))
@@ -160,8 +161,9 @@ def _correct_foods(panel, foods, original, view):
             st.caption(tr("没有搜到，可以换个名字或搜一种配料。", "No matches. Try a different name or ingredient."))
         ranges = original.get("portion_ranges", {})
         if any(ranges.get(key) for key in selected):
-            st.segmented_control(tr("照片里的份量", "Photo portion estimate"), ["偏小", "按照片估计", "偏大"], default="按照片估计",
-                                 format_func=lambda x: tr(x, {"偏小": "Smaller", "按照片估计": "Estimate", "偏大": "Larger"}[x]),
+            sizes = {k: tr(k, v) for k, v in (("偏小", "Smaller"), ("按照片估计", "Estimate"), ("偏大", "Larger"))}
+            st.segmented_control(tr("照片里的份量", "Photo portion estimate"), list(sizes), default="按照片估计",
+                                 format_func=sizes.__getitem__,
                                  required=True, key=f"{view}-size", on_change=_set_photo_size,
                                  args=(view, ranges, suggested))
         weights = {}
@@ -191,8 +193,8 @@ def review_meal(draft):
     draft = reviewable_photo(draft)
     original = dict(draft["input"])
     prefix = f"meal-{draft['id']}"
-    if draft["input"].get("photo_resolution_version") == 2:
-        prefix += "-v2"
+    if version := draft["input"].get("photo_resolution_version"):
+        prefix += f"-v{version}"
     summary = st.container()
     repair_area = st.container()
     leftovers = st.expander(tr("有哪样没吃完？", "Any leftovers?"))
@@ -237,7 +239,8 @@ def review_meal(draft):
             if changed:
                 st.caption("　".join(changed))
             label = tr("已选食物小计约", "Selected subtotal: about") if pending else tr("约", "About")
-            st.markdown(tr(f"{label} **{totals['kcal']:.0f} kcal**　·　蛋白质 **{totals['protein_g']:.1f} g**", f"{label} **{totals['kcal']:.0f} kcal** · Protein **{totals['protein_g']:.1f} g**"))
+            st.markdown(tr(f"{label} **{totals['kcal']:.0f} kcal**　·　蛋白质 **{totals['protein_g']:.1f} g**",
+                           f"{label} **{totals['kcal']:.0f} kcal** · Protein **{totals['protein_g']:.1f} g**"))
         else:
             st.info(tr("还没有匹配到食物，选好菜名后就能记下这餐。", "No foods matched yet. Choose a food to log this meal."))
     row_names = {r["name"] for r in rows}
@@ -263,7 +266,8 @@ def review_meal(draft):
 
     if items:
         with corrections:
-            st.caption(tr(f"盘中 {sum(weights.values())} g · 实吃 {sum(consumed.values())} g", f"Served {sum(weights.values())} g · Eaten {sum(consumed.values())} g"))
+            st.caption(tr(f"盘中 {sum(weights.values())} g · 实吃 {sum(consumed.values())} g",
+                          f"Served {sum(weights.values())} g · Eaten {sum(consumed.values())} g"))
             st.write(tr(f"碳水 {totals['carb_g']:.1f} g · 脂肪 {totals['fat_g']:.1f} g", f"Carbs {totals['carb_g']:.1f} g · Fat {totals['fat_g']:.1f} g"))
             for item in items:
                 st.markdown(f"{food_name(foods[item['food_id']])} · {item['confirmed_g']} g　"
