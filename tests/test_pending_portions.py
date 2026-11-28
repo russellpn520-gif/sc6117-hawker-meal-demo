@@ -21,6 +21,16 @@ def control(app, suffix):
 
 
 class PendingPortionsTests(unittest.TestCase):
+    def test_review_sends_the_actual_food_and_weight_as_mobile_widget_defaults(self):
+        draft = make_draft("text", "rice", {"white-rice": 130}, [])
+        app = AppTest.from_string(f"from meal_review import review_meal\nreview_meal({draft!r})").run()
+        # A mobile client can submit widget defaults before sending its first
+        # interaction. Session-only initialization previously saved zero foods or 1 g.
+        self.assertEqual(list(app.multiselect[0].proto.default), [0])
+        self.assertEqual(app.number_input[0].proto.default, 130)
+        app.number_input[0].set_value(105).run()
+        self.assertEqual(app.number_input[0].value, 105)
+
     def test_reconnect_switch_language_variant_and_confirm_once(self):
         whole = {"white-rice": 200, "boiled-egg": 50}
         parts = {"white-rice": 120, "boiled-egg": 50}

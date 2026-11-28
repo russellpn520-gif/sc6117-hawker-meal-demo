@@ -226,7 +226,9 @@ def _apply_net_weight(view, selected):
 
 
 def _set_photo_size(view, ranges, suggested):
-    choice = st.session_state[f"{view}-size"]
+    choice = st.session_state.get(f"{view}-size")
+    if choice not in ("偏小", "按照片估计", "偏大"):
+        return
     for key, bounds in ranges.items():
         if bounds:
             by_size = {"偏小": bounds[0], "按照片估计": suggested[key], "偏大": bounds[1]}
@@ -243,15 +245,14 @@ def _correct_foods(panel, foods, original, view):
         query = st.text_input(tr("搜索食物", "Search foods"), placeholder=tr("输入菜名或食材", "Enter a dish or ingredient"), key=f"{view}-search")
         selection_key = _selection_key(view)
         stable = f"{view}-selected-ids"
-        if selection_key not in st.session_state:
-            st.session_state[selection_key] = st.session_state.get(stable, [key for key in suggested if key in foods])
-        choices = [*suggested, *st.session_state[selection_key]]
+        initial = [key for key in st.session_state.get(stable, suggested) if key in foods]
+        choices = [*suggested, *initial, *st.session_state.get(selection_key, ())]
         matches = foods.search(query) if query.strip() else original.get("alternatives", [])
         choices.extend(matches)
         options = [key for key in dict.fromkeys(choices) if key in foods]
         labels = {k: f"{food_name(foods[k])} · {source_name(foods[k].source_label)}" for k in options}
         selected = st.multiselect(
-            tr("这餐有哪些食物？", "Foods in this meal"), options,
+            tr("这餐有哪些食物？", "Foods in this meal"), options, default=initial,
             format_func=labels.__getitem__,
             placeholder=tr("选择要记入的食物", "Select foods to include"), key=selection_key,
         )
@@ -269,14 +270,12 @@ def _correct_foods(panel, foods, original, view):
         for key in selected:
             food = foods[key]
             widget_key = f"{view}-grams-{key}"
-            if widget_key not in st.session_state:
-                st.session_state[widget_key] = suggested.get(key, food.serving_g)
             bounds = ranges.get(key)
             detail = (tr(f"照片目测约 {bounds[0]}–{bounds[1]} g", f"Estimated {bounds[0]}–{bounds[1]} g from photo") if bounds else
                       tr(f"参考份量 {food.serving_g} g", f"Reference serving: {food.serving_g} g"))
             weights[key] = st.number_input(
                 tr(f"{food_name(food)} · 端上来的克数", f"{food_name(food)} · grams served"), min_value=1, max_value=3000, step=1,
-                key=widget_key, help=detail,
+                value=suggested.get(key, food.serving_g), key=widget_key, help=detail,
             )
         if selected:
             net = st.number_input(tr("整份净重（可选）", "Total food weight in grams (optional)"), min_value=len(selected), max_value=3000,
