@@ -1,6 +1,6 @@
 """Streamlit Community Cloud entry point for the public mobile diary."""
-from app import run_diary
+import app
 
 
 if __name__ == "__main__":
-    run_diary(public_demo=True)
+    app.run_diary(public_demo=True)

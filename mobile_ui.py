@@ -6,7 +6,7 @@ from html import escape
 import streamlit as st
 
 from i18n import tr, food_name
-from meals import SG_TIME, coverage_status, load_foods, meal_thumbnail, recent_activity, total_nutrients
+from meals import SG_TIME, coverage_status, delete_meal, load_foods, meal_thumbnail, recent_activity, total_nutrients
 from meal_targets import daily_hint, meal_target
 from planning import THEMES, span
 
@@ -45,6 +45,32 @@ def apply_mobile_style():
         min-height: 44px; padding-block: .55rem;
       }
       [class*="st-key-food_hits_"] .stButton button p {text-align: start; overflow-wrap: anywhere;}
+      .st-key-review_header {flex-wrap: nowrap; align-items: center;}
+      .st-key-review_photo {position: relative; flex: 0 0 92px; gap: 0;}
+      .st-key-review_photo img {width: 92px; height: 92px; object-fit: cover; border-radius: .75rem;}
+      .st-key-review_photo .stElementContainer:has(.stButton) {position: absolute; inset: 0; z-index: 1;}
+      .st-key-review_photo .stButton button {width: 92px; height: 92px; background: transparent;
+        border: 0; border-radius: .75rem; color: transparent;}
+      .st-key-review_photo .stButton button * {color: transparent;}
+      .st-key-review_photo .stButton button::after {content: ""; position: absolute; right: 5px; bottom: 5px;
+        width: 21px; height: 21px; border-radius: 5px;
+        background: linear-gradient(white,white) right 4px top 4px / 7px 2px,
+                    linear-gradient(white,white) right 4px top 4px / 2px 7px,
+                    linear-gradient(white,white) left 4px bottom 4px / 7px 2px,
+                    linear-gradient(white,white) left 4px bottom 4px / 2px 7px, rgba(20,38,30,.72);
+        background-repeat: no-repeat;}
+      .st-key-review_photo .stButton button:is(:hover,:active) {background: rgba(0,0,0,.06);}
+      .st-key-review_actions {flex: 1 1 0; min-width: 0; gap: .25rem;}
+      .st-key-review_actions .stMarkdown [data-testid="stMarkdownContainer"],
+      .st-key-review_summary .stMarkdown [data-testid="stMarkdownContainer"] {margin-bottom: 0;}
+      .st-key-review_actions p {margin: 0;}
+      .st-key-review_actions button {min-height: 44px; padding-inline: .6rem;}
+      .st-key-review_summary {gap: .15rem;}
+      [class*="st-key-review_row_"] {flex-wrap: nowrap; border-bottom: 1px solid rgba(119,148,127,.22);}
+      [class*="st-key-review_row_"] .stElementContainer:has(.stMarkdown) {flex: 1 1 0; min-width: 0;}
+      [class*="st-key-review_row_"] .stMarkdown p {margin: 0; line-height: 1.4; overflow-wrap: anywhere;}
+      [class*="st-key-review_row_"] .stButton button {width: 44px; min-height: 44px; padding: 0;
+        border: 0; color: inherit; background: transparent; font-size: 1.2rem;}
       .st-key-hawker_drinks {flex-wrap: wrap; gap: .4rem .45rem;}
       .st-key-hawker_drinks .stButton button {
         min-height: 44px; max-width: 100%; padding: .4rem .8rem;
@@ -365,28 +391,48 @@ def meal_history(records, day=None, *, db_path=None):
                 if usage := original.get("token_usage"):
                     st.caption(tr(f"标签识别 · 输入 {usage['input_tokens']}，输出 {usage['output_tokens']} tokens",
                                   f"Label scan · {usage['input_tokens']} input and {usage['output_tokens']} output tokens"))
-                continue
-            weight = sum(item["confirmed_g"] for item in items)
-            served = original.get("served_grams")
-            if served:
-                st.write(tr(f"盘中 {sum(served.values())} g · 实际计入 {weight} g", f"Served {sum(served.values())} g · Eaten {weight} g"))
             else:
-                st.write(tr(f"实际计入 {weight} g", f"Eaten: {weight} g"))
-            for item in items:
-                st.markdown(f"{_record_name(item)} · {item['confirmed_g']} g · "
-                            + tr(f"约 {item['nutrients']['kcal']:.0f} kcal　[来源]", f"About {item['nutrients']['kcal']:.0f} kcal · [Source]")
-                            + f"({item['source_url']})")
-            if status == "partial" and original.get("unmatched_foods"):
-                st.caption(tr("尚未计入：", "Not counted: ") + tr("、".join(original["unmatched_foods"]), ", ".join(original.get("unmatched_foods_en") or original["unmatched_foods"])))
-            elif status == "legacy_review":
-                st.caption(tr("当时未自动匹配：", "Unmatched items: ") + tr("、".join(original["unmatched_foods"]), ", ".join(original.get("unmatched_foods_en") or original["unmatched_foods"])))
-                st.caption(tr("旧版未保存逐项核对结果，以上为当时记入的食物小计。", "This older entry shows the subtotal of foods that were logged."))
-            notes = original.get("uncertain_items", original.get("unmatched", []))
-            if notes:
-                st.caption(tr("识别备注：", "Photo notes: ") + tr("、".join(notes), ", ".join(original.get("uncertain_items_en") or notes)))
-            if usage := original.get("token_usage"):
-                with st.expander(tr("本次识别用量", "Recognition usage")):
-                    st.caption(tr(f"{original.get('model', '照片识别')} · 输入 {usage['input_tokens']:,} · "
-                                  f"输出 {usage['output_tokens']:,} · 合计 {usage['total_tokens']:,} tokens",
-                                  f"{original.get('model', 'Photo scan')} · Input {usage['input_tokens']:,} · "
-                                  f"Output {usage['output_tokens']:,} · Total {usage['total_tokens']:,} tokens"))
+                weight = sum(item["confirmed_g"] for item in items)
+                served = original.get("served_grams")
+                if served:
+                    st.write(tr(f"盘中 {sum(served.values())} g · 实际计入 {weight} g", f"Served {sum(served.values())} g · Eaten {weight} g"))
+                else:
+                    st.write(tr(f"实际计入 {weight} g", f"Eaten: {weight} g"))
+                for item in items:
+                    st.markdown(f"{_record_name(item)} · {item['confirmed_g']} g · "
+                                + tr(f"约 {item['nutrients']['kcal']:.0f} kcal　[来源]", f"About {item['nutrients']['kcal']:.0f} kcal · [Source]")
+                                + f"({item['source_url']})")
+                if status == "partial" and original.get("unmatched_foods"):
+                    st.caption(tr("尚未计入：", "Not counted: ") + tr("、".join(original["unmatched_foods"]), ", ".join(original.get("unmatched_foods_en") or original["unmatched_foods"])))
+                elif status == "legacy_review":
+                    st.caption(tr("当时未自动匹配：", "Unmatched items: ") + tr("、".join(original["unmatched_foods"]), ", ".join(original.get("unmatched_foods_en") or original["unmatched_foods"])))
+                    st.caption(tr("旧版未保存逐项核对结果，以上为当时记入的食物小计。", "This older entry shows the subtotal of foods that were logged."))
+                notes = original.get("uncertain_items", original.get("unmatched", []))
+                if notes:
+                    st.caption(tr("识别备注：", "Photo notes: ") + tr("、".join(notes), ", ".join(original.get("uncertain_items_en") or notes)))
+                if usage := original.get("token_usage"):
+                    with st.expander(tr("本次识别用量", "Recognition usage")):
+                        st.caption(tr(f"{original.get('model', '照片识别')} · 输入 {usage['input_tokens']:,} · "
+                                      f"输出 {usage['output_tokens']:,} · 合计 {usage['total_tokens']:,} tokens",
+                                      f"{original.get('model', 'Photo scan')} · Input {usage['input_tokens']:,} · "
+                                      f"Output {usage['output_tokens']:,} · Total {usage['total_tokens']:,} tokens"))
+            if details.open:
+                _delete_history_entry(record["id"], db_path)
+
+
+def _delete_history_entry(meal_id, db_path):
+    confirming = st.session_state.get("delete_diary_entry") == meal_id
+    if not confirming:
+        st.button(tr("删除这餐", "Delete meal"), key=f"delete-meal-{meal_id}",
+                  on_click=st.session_state.update, args=({"delete_diary_entry": meal_id},))
+        return
+    st.caption(tr("删除后，当天的营养合计也会更新。", "Deleting this meal also updates the day's totals."))
+    with st.container(horizontal=True):
+        if st.button(tr("确认删除这餐", "Confirm deletion"), key=f"delete-confirm-{meal_id}"):
+            delete_meal(meal_id, db_path)
+            if (st.session_state.get("receipt") or {}).get("id") == meal_id:
+                st.session_state.pop("receipt")
+            st.session_state.pop("delete_diary_entry", None)
+            st.rerun()
+        st.button(tr("取消", "Cancel"), key=f"delete-cancel-{meal_id}",
+                  on_click=st.session_state.pop, args=("delete_diary_entry", None))

@@ -31,7 +31,7 @@ class MealReviewTests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertNotIn("confirmed", app.session_state)
         button = app.button(key="meal-bowl-confirm")
-        self.assertEqual(button.label, "全部吃完，确认记餐")
+        self.assertEqual(button.label, "✓ 没问题，确认记餐")
         button.click().run()
         draft, items = app.session_state.confirmed
         self.assertEqual(draft["id"], "bowl")
@@ -81,7 +81,7 @@ class MealReviewTests(unittest.TestCase):
         self.assertIn("5 项未计入", app.warning[0].value)
         self.assertTrue(any("已选食物小计约 **31 kcal**" in s.value for s in app.markdown))
         self.assertTrue(next(e for e in app.expander if e.label == "补选未匹配的食物").proto.expanded)
-        self.assertFalse(any(b.label == "全部吃完，确认记餐" for b in app.button))
+        self.assertFalse(any(b.label == "✓ 没问题，确认记餐" for b in app.button))
         self.assertNotIn("confirmed", app.session_state)
         app.button(key="meal-bowl-partial-confirm").click().run()
         saved, items = app.session_state.confirmed
@@ -119,9 +119,9 @@ class MealReviewTests(unittest.TestCase):
         self.assertFalse(app.warning)
         app.multiselect(key="meal-bowl-foods").unselect("white-rice").run()
         self.assertIn("陌生主食", app.warning[0].value)
-        self.assertFalse(any(b.label == "全部吃完，确认记餐" for b in app.button))
+        self.assertFalse(any(b.label == "✓ 没问题，确认记餐" for b in app.button))
 
     def test_scale_uncertainty_alone_preserves_one_tap(self):
         app = review_app({"white-rice": 200}, {"unmatched": ["无比例尺，份量为估计"]})
         self.assertFalse(app.warning)
-        self.assertEqual(app.button(key="meal-bowl-confirm").label, "全部吃完，确认记餐")
+        self.assertEqual(app.button(key="meal-bowl-confirm").label, "✓ 没问题，确认记餐")

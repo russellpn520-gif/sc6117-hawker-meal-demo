@@ -45,7 +45,7 @@ class MainDishReviewTests(unittest.TestCase):
         next(b for b in app.button if b.key and b.key.endswith("-hit-ban-mian")).click().run()
         self.assertFalse(app.exception)
         self.assertFalse(app.warning)
-        next(b for b in app.button if b.label == "Ate it all · Log meal").click().run()
+        next(b for b in app.button if b.label == "✓ Looks good · Log meal").click().run()
         saved, items = app.session_state.result
         self.assertEqual({i["food_id"]: i["confirmed_g"] for i in items},
                          {"ban-mian": 360, "tfda-P0200601": 12})
@@ -54,4 +54,8 @@ class MainDishReviewTests(unittest.TestCase):
         app.multiselect[0].unselect("ban-mian").run()
         self.assertFalse(app.exception)
         self.assertTrue(any("main dish is incomplete" in w.value for w in app.warning))
-        self.assertFalse(any(b.label == "Ate it all · Log meal" for b in app.button))
+        self.assertFalse(any(b.label == "✓ Looks good · Log meal" for b in app.button))
+        next(t for t in app.text_input if t.label == "Search for a whole dish").set_value("ban mian").run()
+        next(b for b in app.button if b.key and b.key.endswith("-hit-ban-mian")).click().run()
+        self.assertFalse(app.warning)
+        self.assertTrue(any(b.label == "✓ Looks good · Log meal" for b in app.button))

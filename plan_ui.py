@@ -371,7 +371,7 @@ def _training_log_ui(profile, today, db_path, lang):
                             load_label = tr("每只哑铃重量（kg，每组一个数或共用一个数）",
                                                      "Weight per dumbbell (kg, one value or one per set)") if key == "curl" else tr("每组使用重量（kg）", "Load per set (kg)")
                             loads = st.text_input(ex["name"] + " · " + load_label,
-                                                  value=", ".join(f"{s['kg']:g}" for s in saved), placeholder="2", max_chars=100,
+                                                  value=", ".join(f"{s['kg']:g}" for s in saved), placeholder=tr("例如 20", "e.g. 20"), max_chars=100,
                                                   key=f"log-kg-{day}-{key}")
                         entries[key] = (reps, loads)
                 if st.form_submit_button(tr("保存训练记录", "Save workout log")):

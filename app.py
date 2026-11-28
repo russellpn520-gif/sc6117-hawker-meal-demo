@@ -1,6 +1,7 @@
 import base64
 import binascii
 import sqlite3
+from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import UUID
@@ -16,7 +17,7 @@ from meal_memory import suggest_corrections, usual_meals_ui
 from label_ui import review_label
 from meals import (
     SG_TIME, IncompleteMealError, MealChangedError, create_pending, discard_pending, get_pending, get_profile,
-    list_meals, list_pending,
+    has_pending, list_meals, list_pending,
     load_foods, make_draft, match_text, save_meal, total_nutrients, update_pending,
 )
 from mobile_ui import apply_mobile_style, coverage_status, day_strip, diary_rhythm, meal_history, meal_time, saved_receipt
@@ -74,6 +75,7 @@ def capture_meal(db_path, public_demo):
     new = create_pending(draft, jpeg, db_path=db_path)
     st.session_state.capture_ack = record["id"]
     if new:
+        st.session_state.pop("retaking", None)
         st.session_state.active_draft = key
         st.session_state.pop("receipt", None)
     st.rerun()
@@ -93,6 +95,7 @@ def text_entry(db_path, draft=None):
             update_pending(matched, db_path=db_path)
         else:
             create_pending(matched, db_path=db_path)
+        st.session_state.pop("retaking", None)
         st.session_state.active_draft = matched["id"]
         st.session_state.pop("receipt", None)
         st.rerun()
@@ -107,18 +110,49 @@ def wait_for_recognition(key, db_path, api_key):
     st.caption(tr("正在识别。可以先锁屏，吃完再回来。", "Identifying the food. You can lock your phone and return after eating."))
 
 
+def _discard_review(draft, db_path, *, retake=False):
+    if not discard_pending(draft["id"], db_path=db_path):
+        st.session_state.notice = tr("这餐已在另一处处理。", "This meal has already been handled.")
+        st.rerun()
+    st.session_state.pop("active_draft", None)
+    if retake:
+        st.session_state.retaking = True
+        st.session_state.capture_mode = "label" if draft["input"]["method"] == "label" else "photo"
+        if st.session_state.get("practice_mode"):
+            _switch_practice(False)
+    else:
+        st.session_state.notice = tr("草稿已移除。", "Draft removed.")
+    st.rerun()
+
+
 def review_pending(draft, db_path, public_demo):
     is_label = draft["input"].get("method") == "label"
-    if draft["photo"] and draft["input"].get("sample"):
-        with st.container(horizontal=True, vertical_alignment="center", gap="small"):
-            st.image(draft["photo"], width=88, alt=tr("示例烧鸡、油饭和清汤", "Sample roast chicken, seasoned rice and broth"))
-            st.caption(tr("示例鸡饭 · 剩半碗饭？只调米饭就好。", "Sample chicken rice · Half the rice left? Just adjust the rice."))
-    elif draft["photo"]:
-        with st.expander(tr("查看包装标签", "View package label") if is_label else tr("查看这餐的照片", "View meal photo"),
-                         expanded=is_label):
-            st.image(draft["photo"], width="stretch",
-                     alt=tr("包装营养标签", "Package nutrition panel") if is_label else tr("这餐的照片", "Photo of your meal"))
     status = draft["status"]
+    status_slot = None
+    with st.container(horizontal=True, vertical_alignment="center", gap="small", key="review_header"):
+        if draft["photo"]:
+            alt = tr("查看大图", "View full-size photo")
+            with st.container(width=92, key="review_photo"):
+                st.image(draft["photo"], width=92, alt=tr("这餐的照片", "Meal photo"))
+                if st.button(alt, key="zoom-" + draft["id"], help=alt):
+                    @st.dialog(alt)
+                    def show_photo():
+                        st.image(draft["photo"], width="stretch", alt=tr("原图", "Full photo"))
+                    show_photo()
+        with st.container(key="review_actions"):
+            if draft["photo"]:
+                status_slot = st.empty()
+                if status == "queued":
+                    status_slot.markdown(tr("照片已保存 · 等待识别", "Photo saved · Awaiting recognition"))
+                elif status == "failed":
+                    status_slot.markdown(tr("照片已保存 · 需要核对", "Photo saved · Review needed"))
+                elif is_label:
+                    status_slot.markdown(tr("核对标签和实吃份量", "Check the label and serving"))
+            with st.container(horizontal=True, gap="xsmall"):
+                if draft["photo"] and st.button(tr("重拍", "Retake"), key="retake-" + draft["id"]):
+                    _discard_review(draft, db_path, retake=True)
+                if st.button(tr("删除草稿", "Delete draft"), key="discard-" + draft["id"]):
+                    _discard_review(draft, db_path)
     if status == "queued":
         api_key = photo_api_key(public_demo=public_demo)
         if api_key:
@@ -136,14 +170,14 @@ def review_pending(draft, db_path, public_demo):
     else:
         if not is_label and draft["input"].get("method") == "photo":
             suggest_corrections(draft, load_foods(), db_path)
-        confirmed = review_label(draft, db_path) if is_label else review_meal(draft, db_path)
+        confirmed = review_label(draft, db_path) if is_label else review_meal(draft, db_path, status_slot)
         if confirmed:
             payload, items = confirmed
             try:
                 saved = save_meal(payload, items, db_path=db_path)
             except MealChangedError:
-                st.session_state.notice = tr("这餐的饮品刚刚有更新。请看一眼份量，再确认记餐。",
-                                             "This meal’s drinks changed. Check the updated portions and confirm.")
+                st.session_state.notice = tr("这餐刚更新过。请核对食物和份量，再确认记餐。",
+                                             "This meal changed. Check the updated foods and portions before logging.")
                 st.rerun()
             except IncompleteMealError as exc:
                 st.warning(tr(str(exc), "Some foods still need a match. Review them or explicitly save a partial meal."))
@@ -159,11 +193,6 @@ def review_pending(draft, db_path, public_demo):
     if is_label and status in ("queued", "failed"):
         if st.button(tr("按包装手动填写", "Enter label values manually"), key="manual-label-"+draft["id"]):
             update_pending({**draft, "status": "ready"}, db_path=db_path)
-            st.rerun()
-    with st.expander(tr("管理这份草稿", "Manage draft")):
-        if st.button(tr("放弃这份草稿", "Discard this draft"), key="discard-" + draft["id"]):
-            discard_pending(draft["id"], db_path=db_path)
-            st.session_state.notice = tr("草稿已移除。", "Draft removed.")
             st.rerun()
 
 
@@ -202,6 +231,7 @@ def _switch_practice(enabled, draft_id=None):
                 "training_move_preview", "notice"):
         st.session_state.pop(key, None)
     if draft_id:
+        st.session_state.pop("retaking", None)
         st.session_state.active_draft = draft_id
     if enabled:
         st.query_params["practice"] = "1"
@@ -227,15 +257,25 @@ def next_meal_due(records, now):
 
 def home(db_path, public_demo, today, profile, plan, eaten, records, partial_count, legacy_count):
     pending = list_pending(db_path=db_path)
+    if st.session_state.get("retaking"):
+        st.subheader(tr("重新拍这餐", "Retake meal photo"))
+        meal_entry(db_path, public_demo)
+        st.button(tr("取消重拍", "Cancel retake"), key="cancel_retake",
+                  on_click=st.session_state.pop, args=("retaking", None))
+        return
     if pending:
         with st.container(key="home_pending"):
             pending_review(pending, db_path, public_demo)
-        with st.expander(tr("再记一餐", "Start another meal")):
-            meal_entry(db_path, public_demo)
         return
 
     receipt = st.session_state.get("receipt")
     just_saved = bool(receipt and receipt.get("confirmed_on", receipt["date"]) == today.isoformat())
+    if just_saved:
+        receipt_day = datetime.fromisoformat(receipt["date"]).date()
+        entries = records if receipt_day == today else list_meals(receipt_day, db_path=db_path)
+        if not any(row["id"] == receipt["id"] for row in entries):
+            st.session_state.pop("receipt", None)
+            just_saved = False
     if records or just_saved:
         with st.container(key="home_after"):
             ordered = sorted(records, key=lambda r: (meal_time(r), r["id"]))
@@ -272,8 +312,12 @@ def pending_review(pending, db_path, public_demo):
     if chosen not in docs:
         chosen = pending[0]["id"]
     if count > 1:
+        labels = {key: draft_label(doc) for key, doc in docs.items()}
+        counts = Counter(labels.values())
+        labels = {key: (f"{label} · #{i}" if counts[label] > 1 else label)
+                  for i, (key, label) in enumerate(labels.items(), 1)}
         chosen = st.selectbox(tr("选择待确认的餐", "Choose a draft"), list(docs), index=list(docs).index(chosen),
-                              format_func=lambda i: draft_label(docs[i]))
+                              format_func=labels.__getitem__)
     else:
         st.caption(draft_label(docs[chosen], time_only=True))
     review_pending(docs[chosen], db_path, public_demo)
@@ -346,7 +390,7 @@ def main(*, public_demo=False):
     if practice:
         if st.button(tr("结束试玩，回到我的日记", "Leave practice and return to my diary"), key="leave_practice"):
             _switch_practice(False)
-    else:
+    elif section != "记餐" or not has_pending(db_path=db_path):
         settings(profile, db_path, public_demo)
     coach_entry(today, db_path, public_demo)
 

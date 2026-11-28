@@ -36,7 +36,12 @@ def available_drinks(preferences):
 
 
 def add_drink(db_path, draft_id, drink_id):
-    drink = available_drinks(get_preferences(db_path)).get(drink_id)
+    return set_drink(db_path, draft_id, drink_id, added=True)
+
+
+def set_drink(db_path, draft_id, drink_id, *, added):
+    drinks = available_drinks(get_preferences(db_path)) if added else DRINKS
+    drink = drinks.get(drink_id)
     if not drink:
         return False
     with closing(open_db(db_path)) as db, db:
@@ -45,17 +50,28 @@ def add_drink(db_path, draft_id, drink_id):
         if not row:
             return False
         data = json.loads(row[0])
-        already = data.setdefault("quick_drinks", [])
-        if data.get("status") != "ready" or data["input"]["method"] == "label" or drink_id in already:
+        cups = data.setdefault("quick_drinks", [])
+        if data.get("status") != "ready" or data["input"]["method"] == "label" or (drink_id in cups) == added:
             return False
         for option in (data["input"], *data.get("variants", {}).values()):
             grams = option["suggested_grams"]
-            for key, weight in drink.portions.items():
-                combined = grams.get(key, 0) + weight
-                if combined > 3000:
+            for food, amount in drink.portions.items():
+                weight = grams.get(food, 0) + (amount if added else -amount)
+                if weight > 3000:
                     return False
-                grams[key] = combined
-                option.get("portion_ranges", {}).pop(key, None)
-        already.append(drink_id)
+                if weight > 0:
+                    grams[food] = weight
+                else:
+                    grams.pop(food, None)
+        for edits in data.get("review_edits", {}).values():
+            for food in drink.portions.keys() & edits.keys():
+                weight = edits[food] + (drink.portions[food] if added else -drink.portions[food])
+                if weight > 3000:
+                    return False
+                edits[food] = max(0, weight)
+        if added:
+            cups.append(drink_id)
+        else:
+            cups.remove(drink_id)
         db.execute("UPDATE pending SET data = ? WHERE id = ?", (json.dumps(data, ensure_ascii=False), draft_id))
         return True

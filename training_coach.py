@@ -19,14 +19,16 @@ EXERCISES = {
 MOVEMENTS = {
     "bodyweight": {
         "chest": ("wall_push|靠墙俯卧撑|Wall push-up", "incline_push|上斜俯卧撑|Incline push-up", "pushup|俯卧撑|Push-up"),
-        "back": ("self_row|单臂自抗阻划船|Self-resisted single-arm row", "prone_w|俯卧 W 收肩|Prone W raise", "self_curl|自抗阻弯举|Self-resisted biceps curl"),
+        "back": ("self_row|单臂自抗阻划船|Self-resisted single-arm row", "prone_lat|俯卧下拉|Prone lat pull-down", "self_curl|自抗阻弯举|Self-resisted biceps curl"),
+        "rear_delt": ("prone_w|俯卧 W 收肩|Prone W raise",),
         "shoulder": ("pike|折刀俯卧撑|Pike push-up", "wall_slide|靠墙滑臂|Wall slide", "scap_push|肩胛俯卧撑|Scapular push-up"),
         "legs": ("squat|徒手浅蹲|Bodyweight mini squat", "bridge|臀桥|Glute bridge", "lunge|后撤箭步蹲|Reverse lunge"),
         "core": ("deadbug|死虫式|Dead bug", "side_lift|侧桥抬髋|Side plank hip lift", "march|仰卧交替抬腿|Supine march"),
     },
     "dumbbells": {
         "chest": ("floor_press|哑铃地板卧推|Dumbbell floor press", "squeeze|哑铃夹胸推|Dumbbell squeeze press", "single_press|单臂地板卧推|Single-arm floor press"),
-        "back": ("db_row|单臂哑铃划船|One-arm dumbbell row", "reverse_fly|哑铃反向飞鸟|Dumbbell reverse fly", "curl|哑铃弯举|Dumbbell curl"),
+        "back": ("db_row|单臂哑铃划船|One-arm dumbbell row", "db_pullover|哑铃仰卧上拉|Dumbbell pullover", "curl|哑铃弯举|Dumbbell curl"),
+        "rear_delt": ("reverse_fly|哑铃反向飞鸟|Dumbbell reverse fly",),
         "shoulder": ("db_press|哑铃肩推|Dumbbell overhead press", "lateral|哑铃侧平举|Dumbbell lateral raise", "scaption|哑铃肩胛平面举|Dumbbell scaption"),
         "legs": ("goblet|高脚杯深蹲|Goblet squat", "rdl|哑铃罗马尼亚硬拉|Dumbbell Romanian deadlift", "split|哑铃分腿蹲|Dumbbell split squat"),
         "core": ("suitcase|单侧负重原地踏步|Suitcase march", "db_deadbug|哑铃死虫式|Dumbbell dead bug", "chop|哑铃对角举|Dumbbell diagonal lift"),
@@ -34,6 +36,7 @@ MOVEMENTS = {
     "gym": {
         "chest": ("bench|杠铃卧推|Barbell bench press", "incline|上斜器械推胸|Incline machine press", "pec|蝴蝶机夹胸|Pec deck fly"),
         "back": ("pulldown|高位下拉|Lat pulldown", "row|坐姿绳索划船|Seated cable row", "cable_curl|绳索弯举|Cable curl"),
+        "rear_delt": ("face_pull|绳索面拉|Cable face pull",),
         "shoulder": ("machine_press|器械肩推|Machine shoulder press", "face_pull|绳索面拉|Cable face pull", "cable_raise|绳索侧平举|Cable lateral raise"),
         "legs": ("leg_press|腿举|Leg press", "leg_curl|坐姿腿弯举|Seated leg curl", "hip_thrust|器械臀推|Machine hip thrust"),
         "core": ("pallof|绳索抗旋推|Pallof press", "cable_chop|绳索伐木|Cable chop", "crunch|跪姿绳索卷腹|Kneeling cable crunch"),
@@ -42,8 +45,8 @@ MOVEMENTS = {
 SPLITS = {
     "full": ("legs", "chest", "back", "core"), "upper": ("chest", "back", "shoulder", "back"),
     "lower": ("legs", "legs", "core", "legs"), "push": ("chest", "shoulder", "chest", "shoulder"),
-    "pull": ("back", "back", "back", "shoulder"), "legs": ("legs", "legs", "legs", "core"),
-    "chest": ("chest", "shoulder", "chest", "shoulder"), "back": ("back", "back", "back", "shoulder"),
+    "pull": ("back", "back", "back", "rear_delt"), "legs": ("legs", "legs", "legs", "core"),
+    "chest": ("chest", "shoulder", "chest", "shoulder"), "back": ("back", "back", "back", "rear_delt"),
     "core": ("core", "core", "legs", "core"),
 }
 WEIGHTED = {"curl"}
@@ -79,38 +82,52 @@ def save_training_preferences(profile, prefs, *, db_path=None):
         if not row:
             raise ValueError("A saved profile is required.")
         current = Profile.model_validate_json(row[0])
-        history = current.training_history
-        if current.training:
-            old = current.training
-            if old.model_dump(exclude={"since"}) == prefs.model_dump(exclude={"since"}):
-                return current
-            if already_logged(db, prefs.since):
-                prefs = prefs.model_copy(update={"since": prefs.since + timedelta(days=1)})
-            if old.since < prefs.since:
-                history = (*history, old)
-        updated = current.model_copy(update={"training": prefs, "training_history": history})
+        old = current.training
+        same = old and old.model_dump(exclude={"since"}) == prefs.model_dump(exclude={"since"})
         start = prefs.since
-        # Prefer already-confirmed moves as long as they allow a recovery day.
-        overrides = [date.fromisoformat(day) for day, in
-                     db.execute("SELECT day FROM workouts WHERE day >= ? ORDER BY day", (start.isoformat(),))]
-        rests = {date.fromisoformat(day) for day, in db.execute("SELECT day FROM rest_days WHERE day >= ?",
-                                                               (start.isoformat(),))}
-        kept = set()
-        for day in overrides:
-            adjacent = [day - timedelta(days=1), day + timedelta(days=1)]
-            neighbors = {d for d in adjacent if d in kept or (updated.scheduled_by_default(d) and d not in rests)}
-            moved = db.execute("SELECT original_day FROM workout_moves WHERE day=?", (day.isoformat(),)).fetchone()
-            # A changed weekly split can retire the original appointment or
-            # assign another workout at the destination. Release that override.
-            original = date.fromisoformat(moved[0]) if moved else None
-            conflict = original and (not updated.scheduled_by_default(original) or updated.scheduled_by_default(day))
-            if not conflict and valid_training_move(updated, day, day, neighbors):
-                kept.add(day)
+        if already_logged(db, start):
+            start += timedelta(days=1)
+        updated = current
+        if not same:
+            history = current.training_history
+            if old and old.since < start:
+                history = (*history, old)
+            updated = current.model_copy(update={"training": prefs.model_copy(update={"since": start}),
+                                                 "training_history": history})
+        weekdays_changed = not old or set(old.weekdays) != set(prefs.weekdays)
+        boundary = (start.isoformat(),)
+        db.execute("""DELETE FROM workout_moves WHERE day >= ?
+                      AND day NOT IN (SELECT day FROM workouts)""", boundary)
+        overrides = db.execute("""SELECT w.day, m.original_day FROM workouts w
+                                  LEFT JOIN workout_moves m ON m.day=w.day
+                                  WHERE w.day >= ? ORDER BY w.day""", boundary).fetchall()
+        candidates = []
+        for raw_day, raw_source in overrides:
+            day = date.fromisoformat(raw_day)
+            source = date.fromisoformat(raw_source) if raw_source else None
+            if source:
+                conflict = (not updated.scheduled_by_default(source) or updated.scheduled_by_default(day)
+                            or (weekdays_changed and day.weekday() not in prefs.weekdays))
             else:
-                db.execute("DELETE FROM workouts WHERE day=?", (day.isoformat(),))
-                db.execute("DELETE FROM workout_moves WHERE day=?", (day.isoformat(),))
-                if original and original >= start:
-                    db.execute("DELETE FROM rest_days WHERE day=?", (original.isoformat(),))
+                conflict = day.weekday() not in prefs.weekdays
+            if conflict:
+                db.execute("DELETE FROM workouts WHERE day=?", (raw_day,))
+                db.execute("DELETE FROM workout_moves WHERE day=?", (raw_day,))
+            else:
+                candidates.append((day, source))
+        # Only an actual rescheduled session can suppress its original weekday.
+        # Historical destinations may also account for a future rest marker.
+        db.execute("""DELETE FROM rest_days WHERE day >= ?
+                      AND day NOT IN (SELECT original_day FROM workout_moves)""", boundary)
+        for day, source in candidates:
+            neighbors = _planned_days(db, updated, day - timedelta(days=1), day + timedelta(days=1))
+            if valid_training_move(updated, day, day, neighbors):
+                continue
+            db.execute("DELETE FROM workouts WHERE day=?", (day.isoformat(),))
+            db.execute("DELETE FROM workout_moves WHERE day=?", (day.isoformat(),))
+            if source and source >= start:
+                db.execute("DELETE FROM rest_days WHERE day=? AND day NOT IN (SELECT original_day FROM workout_moves)",
+                           (source.isoformat(),))
         db.execute("UPDATE profile SET data=? WHERE id=1", (updated.model_dump_json(),))
     return updated
 

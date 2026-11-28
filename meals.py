@@ -214,6 +214,18 @@ def update_pending_portion(key, method, variant, *, food_id=None, scope=None, qu
         """, (json.dumps({"portion_review": choice}, ensure_ascii=False), key, method, method)).rowcount == 1
 
 
+def update_review_foods(key, view, edits, *, db_path=None):
+    """Persist only changed foods in this view. Zero grams means explicitly removed."""
+    if any(type(g) is not int or not 0 <= g <= 3000 for g in edits.values()):
+        raise ValueError("Invalid serving weight")
+    patch = json.dumps({"review_edits": {view: edits}}, ensure_ascii=False)
+    with closing(open_db(db_path)) as db, db:
+        return db.execute("""
+            UPDATE pending SET data=json_patch(data, ?)
+            WHERE id=? AND json_extract(data, '$.status')='ready'
+        """, (patch, key)).rowcount == 1
+
+
 def claim_pending(key, *, db_path=None):
     """Allow at most one worker to recognize this dish during the model timeout."""
     token = uuid4().hex
@@ -323,13 +335,14 @@ def save_meal(draft, items, *, db_path=None):
     sums = total_nutrients([item["nutrients"] for item in items])
     with closing(open_db(db_path)) as db, db:
         db.execute("BEGIN IMMEDIATE")
-        saved = db.execute("SELECT captured_at, photo, json_extract(data, '$.quick_drinks') FROM pending WHERE id = ?",
+        saved = db.execute("SELECT captured_at, photo, json_extract(data, '$.quick_drinks'), json_extract(data, '$.review_edits') FROM pending WHERE id = ?",
                            (draft["id"],)).fetchone()
         if not saved and ("captured_at" in draft or
                           db.execute("SELECT 1 FROM discarded WHERE id = ?", (draft["id"],)).fetchone()):
             return False
-        if saved and json.loads(saved[2] or "[]") != draft.get("quick_drinks", []):
-            raise MealChangedError("The drinks on this draft have changed.")
+        if saved and (json.loads(saved[2] or "[]") != draft.get("quick_drinks", [])
+                      or json.loads(saved[3] or "{}") != draft.get("review_edits", {})):
+            raise MealChangedError("The foods or drinks on this draft have changed.")
         day = datetime.fromisoformat(saved[0]).astimezone(SG_TIME).date() if saved else now.date()
         original = {**draft["input"], "captured_at": saved[0]} if saved else draft["input"]
         photo = saved[1] if saved else draft.get("photo")
@@ -342,6 +355,15 @@ def save_meal(draft, items, *, db_path=None):
         if saved:
             db.execute("DELETE FROM pending WHERE id = ?", (draft["id"],))
         return bool(inserted)
+
+
+def delete_meal(meal_id, db_path=None):
+    """Delete a confirmed meal and prevent an older device draft from restoring it."""
+    with closing(open_db(db_path)) as db, db:
+        deleted = db.execute("DELETE FROM meals WHERE id=?", (meal_id,)).rowcount
+        if deleted:
+            db.execute("INSERT OR IGNORE INTO discarded(id) VALUES (?)", (meal_id,))
+        return bool(deleted)
 
 
 def list_meals(day, *, db_path=None):

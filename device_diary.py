@@ -136,7 +136,7 @@ def cloud_diary():
     path = _diary_path(token)
     if path:
         if state.get("diary_token") and state.diary_token != token:
-            for key in ("active_draft", "capture_ack", "receipt", "edit_profile"):
+            for key in ("active_draft", "capture_ack", "receipt", "edit_profile", "retaking", "delete_diary_entry"):
                 state.pop(key, None)
         state.diary_token = token
         _sync_pending(path, token)

@@ -36,7 +36,7 @@ class PracticeAndDrinksTests(unittest.TestCase):
             prefix = f"meal-{draft['id']}-v3"
             ui.segmented_control(key=prefix + "-eaten-fdc-2708407-en").set_value(2).run()
             ui.button(key=prefix + "-cup-kopi").click().run()
-            self.assertTrue(ui.button(key=prefix + "-cup-kopi").disabled)
+            self.assertEqual(ui.button(key=prefix + "-cup-kopi").label, "✓ Kopi O Kosong ×")
             ui.button(key=prefix + "-confirm").click().run()
             self.assertFalse(ui.exception)
             record, = list_meals(self.today, db_path=path)
