@@ -9,7 +9,8 @@ from pydantic import BaseModel, Field
 
 from meals import (coverage_status, get_profile, list_meals, list_meals_between, move_workout,
                    open_db, planned_days, total_nutrients)
-from planning import day_plan, move_targets, span, valid_training_move
+from meal_targets import meal_target
+from planning import THEMES, day_plan, move_targets, span, valid_training_move
 from training_coach import already_logged, training_reply
 
 
@@ -24,9 +25,9 @@ class ReadWorkout(BaseModel):
 
 
 class PlanDinner(BaseModel):
-    """Find a dinner to order or cook, or a grocery list, using saved preferences."""
+    """Find the next meal to order or cook, or a grocery list, using saved preferences."""
     groceries: bool
-    budget_sgd: float | None = Field(description="An explicit spending ceiling for one dinner in Singapore dollars, or null.")
+    budget_sgd: float | None = Field(description="An explicit spending ceiling for one meal in Singapore dollars, or null.")
     new_food_restrictions: bool = Field(description="True if the user specifies or changes any allergy, excluded item, dietary constraint or special diet in this request.")
     mode: Literal["out", "home"] | None = Field(
         default=None, json_schema_extra=lambda schema: schema.pop("default", None),
@@ -157,7 +158,9 @@ def _move_preview(profile, origin, destination, today, db_path, en):
     lines = [f"{a:%m/%d} → {b:%m/%d} · " + ("Proposed move" if en else "改期预览")]
     for day, (old, new) in zip((a, b), targets):
         lines.append(f"- {day:%m/%d} · {span(old.kcal)} → {span(new.kcal)} kcal · " +
-                     ("protein " if en else "蛋白质 ") + f"{old.protein_g} → {new.protein_g} g")
+                     ("protein " if en else "蛋白质 ") + f"{old.protein_g} → {new.protein_g} g · " +
+                     ("carbs " if en else "碳水 ") + f"{old.carb_g} → {new.carb_g} g · " +
+                     ("fat " if en else "脂肪 ") + f"{old.fat_g} → {new.fat_g} g")
     return "\n".join(lines), (a, b), targets
 
 
@@ -272,12 +275,14 @@ def ask_coach(question, *, today, db_path=None, lang="zh", api_key="", quick=Non
             result["show_training_setup"] |= not (profile and profile.training)
         elif isinstance(call, PlanDinner):
             mode = "home" if call.groceries else call.mode or get_dinner_mode(db_path)
+            result["shopping"] = call.groceries
             result["dinner_mode"] = mode
             result["dinner_budget_sgd"] = call.budget_sgd
             if mode is None:
-                messages.append("Where are you having dinner?" if en else "今晚准备在哪儿吃？")
+                messages.append("Where would you like to eat?" if en else "下一顿想在哪儿吃？")
                 continue
             rows, totals, partial, plan = _today_values(profile, today, db_path)
+            target = meal_target(plan, totals, rows, partial)
             eligible = bool(rows and plan and not partial)
             prior = result["meal_context"] or meal_context
             use_prior = call.groceries and isinstance(prior, dict) and prior.get("day") == today.isoformat()
@@ -287,38 +292,38 @@ def ask_coach(question, *, today, db_path=None, lang="zh", api_key="", quick=Non
             text, context = dinner_result(
                 db_path, lang=lang, mode=mode, shopping=call.groceries, budget_sgd=cap,
                 recipe_name=prior["recipe_name"] if use_prior else None,
-                remaining_kcal=max(0, plan.kcal[0] - totals["kcal"]) if eligible else None,
-                remaining_protein=max(0, plan.protein_g - totals["protein_g"]) if eligible else None,
+                side_key=prior.get("side_key") if use_prior else None,
+                target=target, remaining_kcal=target.amounts.get("kcal"), remaining_protein=target.amounts.get("protein_g"),
             )
             if context and "reference_portions" in context:
                 result["dinner_references"] = context["reference_portions"]
             else:
                 result["meal_context"] = dict(context, day=today.isoformat()) if context else None
             if plan:
-                label = ("Training day" if plan.training else "Rest day") if en else plan.label
+                label = THEMES[plan.theme][en]
                 if eligible:
                     kcal_left = span(tuple(max(0, target - totals["kcal"]) for target in plan.kcal))
                     protein_left = max(0, plan.protein_g - totals["protein_g"])
-                    text += (f"\n\n{label} · Your log leaves about {kcal_left} kcal and {protein_left:.0f} g protein before dinner." if en
-                             else f"\n\n今天是{label}，按已确认餐食，晚饭前余量约 {kcal_left} kcal、蛋白质 {protein_left:.0f} g。")
+                    text += (f"\n\n{label} · Your log leaves about {kcal_left} kcal and {protein_left:.0f} g protein left today." if en
+                             else f"\n\n今天是{label}，按已确认餐食，今天余量约 {kcal_left} kcal、蛋白质 {protein_left:.0f} g。")
                 else:
                     text += f"\n\n{label} · {span(plan.kcal)} kcal · {plan.protein_g} g " + ("protein target" if en else "蛋白质目标")
             if partial:
-                text += (" · Some meals are partial; dinner is based on your preferences." if en else " · 日记有部分记录，晚餐按饮食偏好筛选。")
+                text += (" · Some meals are partial; picks use your preferences." if en else " · 日记有部分记录，餐食按饮食偏好筛选。")
         elif isinstance(call, NextStep) and call.reason == "food_preferences":
             result["show_nutrition"] = True
             text = ("Review and save all food exclusions in Meal preferences before requesting a menu with these constraints." if en
-                    else "请先在饮食偏好里核对并保存全部忌口和过敏原，再按这些条件找晚餐。")
+                    else "请先在饮食偏好里核对并保存全部忌口和过敏原，再按这些条件选餐。")
         elif isinstance(call, NextStep) and call.reason == "training_preferences":
             result["show_training_setup"] = True
             text = ("Set your equipment, session length and available weekdays in your training plan, then ask for your workout." if en
                     else "请在训练安排里选择当前可用的器械、时长和星期，再查看按这些条件生成的训练。")
         else:
-            text = ("Would you like to review your food log, plan dinner, check a workout or move a session?" if en
-                    else "你想看日记、安排晚餐、查看训练，还是给某次训练改期？")
+            text = ("Would you like to review your food log, plan your next meal, check a workout or move a session?" if en
+                    else "你想看日记、安排下一顿、查看训练，还是给某次训练改期？")
         messages.append(text)
     if result["move"] and any(isinstance(c, PlanDinner) for c in calls):
-        messages.append("Dinner uses the saved schedule. After confirming the move, ask for dinner again." if en
-                        else "晚餐按当前已保存日程规划；确认改期后可以再查看晚餐。")
+        messages.append("Meal targets follow your saved schedule. Open the meal planner after confirming your move." if en
+                        else "选餐参考当前日程。确认改期后，再打开就能看到更新的推荐。")
     result["text"] = "\n\n".join(messages)
     return result

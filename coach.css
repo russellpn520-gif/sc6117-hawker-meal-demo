@@ -63,6 +63,7 @@
 .mituan-intro .mituan-face {flex:none;font-size:.94px;}
 .mituan-intro p {margin:0;}
 .st-key-mituan_actions button, .st-key-mituan_panel button {min-height:44px;}
+.st-key-mituan_panel [data-testid="stCheckbox"] label {min-height:44px; align-items:center;}
 .st-key-mituan_panel :is(input,textarea) {font-size:16px;}
 .st-key-mituan_panel {overflow-wrap:break-word;}
 [role="dialog"]:has(.st-key-mituan_panel) button[aria-label="Close"] {

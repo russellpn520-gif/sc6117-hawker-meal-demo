@@ -12,7 +12,7 @@ def nutrition_preferences(db_path, *, key="food_preferences"):
     allergy_default = (list(prefs.allergies) or ["none"]) if prefs and prefs.allergies is not None else []
     diet_keys = list(DIETS)
     with st.form(key, border=False):
-        budget = st.number_input(tr("一人晚餐预算（S$，选填）", "Dinner budget per person (S$, optional)"),
+        budget = st.number_input(tr("一人单餐预算（S$，选填）", "Meal budget per person (S$, optional)"),
                                  min_value=0.01, step=0.5,
                                  value=prefs.budget_cents / 100 if prefs and prefs.budget_cents else None,
                                  placeholder=tr("未设预算", "No budget set"), key=f"{key}-budget")
@@ -34,6 +34,6 @@ def nutrition_preferences(db_path, *, key="food_preferences"):
         reported = tuple(k for k in allergies if k != "none") if allergies else None
         save_preferences(db_path, Preferences(budget_cents(budget), diet, reported,
                                               tuple(avoid), other.strip()))
-        st.success(tr("已保存，将按这些条件筛选晚餐。", "Saved. Dinner suggestions will use these preferences."))
+        st.success(tr("已保存，将按这些条件筛选餐食。", "Saved. Meal suggestions will use these preferences."))
         return True
     return False

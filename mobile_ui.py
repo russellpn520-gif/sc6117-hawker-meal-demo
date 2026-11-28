@@ -7,7 +7,8 @@ import streamlit as st
 
 from i18n import tr, food_name
 from meals import SG_TIME, coverage_status, load_foods, meal_thumbnail, recent_activity, total_nutrients
-from planning import span
+from meal_targets import daily_hint, meal_target
+from planning import THEMES, span
 
 
 def apply_mobile_style():
@@ -102,6 +103,10 @@ def apply_mobile_style():
       }
       .st-key-day_strip p {margin: 0; line-height: 1.4;}
       .meal-meters {display: grid; gap: .75rem; margin-block: .25rem;}
+      .macro-meters {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.6rem}
+      .macro-meters .meal-meter-line {display:grid;gap:0}
+      .macro-meters .meal-meter-line strong {font-size:1rem}
+      .macro-meters .meal-meter-line small {font-size:.75rem}
       .meal-meter-line {
         display: flex; align-items: baseline; flex-wrap: wrap; column-gap: .5rem;
         font-variant-numeric: tabular-nums; line-height: 1.35;
@@ -181,7 +186,7 @@ def _meter(label, value, unit, current, target, bounds, complete):
     tone = "no-target"
     attrs = 'aria-hidden="true"'
     fill = 0
-    if bounds:
+    if bounds and bounds[0] > 0:
         low, high = bounds
         fill = min(100, max(0, current / low * 100))
         tone = "in-range" if complete and current >= low else ""
@@ -195,7 +200,7 @@ def _meter(label, value, unit, current, target, bounds, complete):
             f'<div class="meal-track {tone}" {attrs}><span style="width:{fill:.2f}%"></span></div></div>')
 
 
-def day_strip(today, plan, eaten, meal_count, partial_count=0, legacy_count=0):
+def day_strip(today, plan, eaten, meal_count, partial_count=0, legacy_count=0, records=()):
     kcal, protein = eaten["kcal"], eaten["protein_g"]
     note = coverage_note(partial_count, legacy_count)
     kcal_target, protein_target = "", ""
@@ -203,17 +208,21 @@ def day_strip(today, plan, eaten, meal_count, partial_count=0, legacy_count=0):
     if plan:
         kcal_target = tr(f"参考 {span(plan.kcal)}", f"Target {span(plan.kcal)}")
         protein_target = tr(f"目标 {plan.protein_g} g", f"Target {plan.protein_g} g")
-        heading = tr(f"{today.month} 月 {today.day} 日 · {plan.label}",
-                     f"{today:%d %b} · {'Training day' if plan.training else 'Rest day'}")
+        theme = tr(*THEMES[plan.theme if plan.training else "rest"])
+        heading = tr(f"{today.month} 月 {today.day} 日 · {theme}", f"{today:%d %b} · {theme}")
         if not meal_count:
             heading += tr(" · 今日热量参考", " · Today's energy target")
     energy_meter = _meter(tr("热量", "Energy"), f"{kcal:.0f}", "kcal", kcal, kcal_target,
                           plan.kcal if plan else None, not note)
-    protein_meter = _meter(tr("蛋白质", "Protein"), f"{protein:.1f}", "g", protein, protein_target,
-                           (plan.protein_g, None) if plan else None, not note)
+    macros = []
+    for key, name in (("protein_g", tr("蛋白", "Protein")), ("carb_g", tr("碳水", "Carbs")), ("fat_g", tr("脂肪", "Fat"))):
+        amount = eaten.get(key, 0)
+        goal = getattr(plan, key, None)
+        macros.append(_meter(name, f"{amount:.0f}", "g", amount, f"/ {goal} g" if goal else "",
+                             (goal, goal) if goal else None, not note))
     with st.container(key="day_strip"):
         st.markdown(f"**{heading}**")
-        st.html(f'<div class="meal-meters">{energy_meter}{protein_meter}</div>')
+        st.html(f'<div class="meal-meters">{energy_meter}<div class="macro-meters">{"".join(macros)}</div></div>')
         if note:
             st.markdown(tr(f"以上是已记小计，含{note}。", f"Logged subtotal, including {note}."))
         elif plan and meal_count:
@@ -226,11 +235,17 @@ def day_strip(today, plan, eaten, meal_count, partial_count=0, legacy_count=0):
             else:
                 feedback = tr("今天吃得很扎实，下一餐照自己的胃口来。", "A hearty day. Let your appetite guide your next meal.")
             st.markdown(feedback)
-            if kcal <= high and protein < plan.protein_g:
-                left = plan.protein_g - protein
-                st.caption(tr(f"蛋白质还余 {left:.1f} g", f"{left:.1f} g protein left"))
+            target = meal_target(plan, eaten, records)
+            st.caption(tr(*daily_hint(plan, eaten, target.veg_gap, datetime.now(SG_TIME).hour)))
         if plan:
-            st.button(tr("调整训练安排", "Adjust training"), on_click=_open_training, key="home_training")
+            with st.expander(tr("目标明细", "Target details")):
+                if meal_count and not note:
+                    left = max(0, plan.protein_g - protein)
+                    st.caption(tr(f"蛋白质还余 {left:.1f} g", f"{left:.1f} g protein left"))
+                st.caption(tr("三大营养素按热量区间中点估算，碳水和蛋白每克 4 kcal，脂肪每克 9 kcal。训练日配比是可调整的计划参考。",
+                              "Macro estimates use the midpoint of your energy range, at 4/4/9 kcal per gram of carbs, protein and fat. Workout-day splits are planning estimates."))
+                st.markdown("[HPB · My Healthy Plate](https://www.healthhub.sg/well-being-and-lifestyle/food-diet-and-nutrition/plan-your-meals-with-my-healthy-plate) · [DRI · AMDR](https://www.nationalacademies.org/read/27957/chapter/5)")
+                st.button(tr("调整训练安排", "Adjust training"), on_click=_open_training, key="home_training")
         else:
             st.caption(tr("个人目标可按需设置。", "You can set personal targets whenever you like."))
 
@@ -251,12 +266,23 @@ def _meal_names(items):
     return names
 
 
-def saved_receipt(record, *, just_saved):
+def meal_time(record):
+    if stamp := record["input"].get("captured_at"):
+        try:
+            return datetime.fromisoformat(stamp).astimezone(SG_TIME)
+        except (TypeError, ValueError):
+            pass
+    return record["at"]
+
+
+def saved_receipt(record, *, just_saved, number=None):
     status = coverage_status(record)
     if status == "complete":
         title = tr("这餐已记入日记", "Meal added to diary") if just_saved else tr("最近一餐", "Last meal")
     else:
         title = tr("这餐已记录的小计", "Logged meal subtotal")
+    if number:
+        title = tr(f"第 {number} 餐", f"Meal {number}") + " · " + title
     st.markdown(f"**{title}**")
     names = _meal_names(record.get("items", []))
     totals = record["totals"]
@@ -313,11 +339,13 @@ def meal_history(records, day=None, *, db_path=None):
     qualifier = tr(f"（含 {note}）", f" ({note})") if note else ""
     st.markdown(tr(f"**{len(records)} 餐 · 约 {total['kcal']:.0f} kcal{qualifier}**", f"**Meals: {len(records)} · About {total['kcal']:.0f} kcal{qualifier}**"))
     st.caption(tr(f"蛋白质 {total['protein_g']:.1f} g · 碳水 {total['carb_g']:.1f} g · 脂肪 {total['fat_g']:.1f} g", f"Protein {total['protein_g']:.1f} g · Carbs {total['carb_g']:.1f} g · Fat {total['fat_g']:.1f} g"))
-    for record, status in zip(records, statuses):
+    ordered = sorted(zip(records, statuses), key=lambda pair: (meal_time(pair[0]), pair[0]["id"]), reverse=True)
+    for index, (record, status) in enumerate(ordered):
         items = record["items"]
         if not items:
             continue
-        title = _meal_names(items)
+        number = len(ordered) - index
+        title = tr(f"第 {number} 餐", f"Meal {number}") + " · " + _meal_names(items)
         original = record["input"]
         if status == "partial":
             title += tr("（部分记录）", " (partial)")

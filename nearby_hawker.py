@@ -11,7 +11,8 @@ from urllib.parse import urlencode
 from uuid import UUID
 
 from meals import create_pending, get_pending, load_foods, make_draft, open_db, portion_items, total_nutrients
-from nutrition_coach import Preferences, _dinner_fit, _valid, get_preferences
+from meal_targets import fit_reason, fit_score, vegetable_grams
+from nutrition_coach import Preferences, _dinner_fit, _valid, checked_side_grams, choose_booster, get_preferences
 
 
 DATA = Path(__file__).resolve().parent / "data"
@@ -120,7 +121,7 @@ def _room_for_special(training, remaining_kcal):
     return training and isinstance(low, (int, float)) and isfinite(low) and low >= 850
 
 
-def recommend_nearby(coords, today, *, preferences=None, remaining_kcal=None, remaining_protein=None, training=False, page=0):
+def recommend_nearby(coords, today, *, preferences=None, remaining_kcal=None, remaining_protein=None, training=False, page=0, target=None, budget_limit=None, evening=True):
     data = _directory()
     prefs = preferences if preferences is not None else Preferences(None, "any", None)
     special = _room_for_special(training, remaining_kcal)
@@ -135,7 +136,7 @@ def recommend_nearby(coords, today, *, preferences=None, remaining_kcal=None, re
         if _closed(venue, today):
             closed[order["venue"]] = venue["names"]
             continue
-        if today.weekday() in order.get("closed_evenings", venue.get("closed_evenings", ())):
+        if evening and today.weekday() in order.get("closed_evenings", venue.get("closed_evenings", ())):
             continue
         items = portion_items(foods, order["portion_items"])
         totals = total_nutrients([i["nutrients"] for i in items])
@@ -145,7 +146,21 @@ def recommend_nearby(coords, today, *, preferences=None, remaining_kcal=None, re
         fit = min(3.0, _dinner_fit(totals, remaining_kcal, remaining_protein))
         score = (distance // 1000, style_mismatch, distance + 140 * fit,
                  -min(35, totals["protein_g"]), distance, order["id"])
-        if special and order["treat_friendly"]:
+        if target:
+            veg = vegetable_grams(items)
+            fit = fit_score(target, totals, veg)
+            cap = budget_limit if budget_limit is not None else prefs.budget_cents
+            # The merchant lists an online base price. Use it as a budget
+            # signal only. Other venue prices remain unknown until ordering.
+            online = order.get("online_menu_cents")
+            budget_penalty = max(0, online - cap) / 100 if online and cap is not None else 0
+            score = (distance // 1000, budget_penalty, special and style_mismatch,
+                     fit + distance / 550 + style_mismatch * .8, distance, order["id"])
+            reason = fit_reason(target, totals, veg)
+            if special and order["treat_friendly"]:
+                reason = ("今天有训练，热量余量也够，想吃招牌就点这份。", "There’s room in today’s training plan for this house special.") if not target.amounts else (
+                    "今天有训练，这份招牌能补上这顿的能量。", "This house special helps fuel your training day.")
+        elif special and order["treat_friendly"]:
             reason = ("今天有训练，余量也宽裕，今晚可以试试这份招牌。", "Training day with room in your target. This is a good evening for the house special.")
         elif not order["treat_friendly"] and remaining_protein is not None:
             reason = ("这份搭配就近，也把蛋白质算进了今天的余量。", "A nearby order picked with your remaining protein target in mind.")
@@ -158,7 +173,8 @@ def recommend_nearby(coords, today, *, preferences=None, remaining_kcal=None, re
         card = {key: order[key] for key in ("id", "dish", "stall", "order", "note", "treat_friendly")}
         card.update(centre=venue["names"], distance_m=distance, maps_url=maps_url,
                     venue_url=data["sources"][order["source"]], centre_url=data["sources"][venue["source"]],
-                    reason=reason, items=items, totals=totals)
+                    reason=reason, items=items, totals=totals,
+                    booster=choose_booster(target, totals, prefs) if target else None)
         ranked.append((score, card))
     ranked.sort(key=lambda candidate: candidate[0])
     cards = [card for _, card in ranked]
@@ -169,7 +185,7 @@ def recommend_nearby(coords, today, *, preferences=None, remaining_kcal=None, re
             "schedule_covered": today.year == NEA_SCHEDULE_YEAR}
 
 
-def add_nearby_draft(db_path, order_id, today, *, draft_id=None):
+def add_nearby_draft(db_path, order_id, today, *, draft_id=None, side_key=None, evening=True):
     """Recheck the saved restrictions and venue date before saving an editable, local draft."""
     data = _directory()
     order = next((item for item in data["orders"] if item["id"] == order_id), None)
@@ -177,9 +193,12 @@ def add_nearby_draft(db_path, order_id, today, *, draft_id=None):
     if order is None or not _suitable(order, prefs):
         raise ValueError("unavailable")
     venue = data["venues"][order["venue"]]
-    if _closed(venue, today) or today.weekday() in order.get("closed_evenings", venue.get("closed_evenings", ())):
+    if _closed(venue, today) or (evening and today.weekday() in order.get("closed_evenings", venue.get("closed_evenings", ()))):
         raise ValueError("unavailable")
     grams = dict(order["portion_items"])
+    if side_key:
+        food, weight = checked_side_grams(side_key, prefs)
+        grams[food] = grams.get(food, 0) + weight
     portion_items(load_foods(), grams)
     draft = make_draft("text", " / ".join(order["dish"]), grams, [])
     draft["status"] = "ready"
@@ -188,6 +207,6 @@ def add_nearby_draft(db_path, order_id, today, *, draft_id=None):
         draft["id"] = str(UUID(str(draft_id)))
     if not create_pending(draft, db_path=db_path):
         existing = get_pending(draft["id"], db_path=db_path)
-        if not existing or existing["input"].get("nearby_order_id") != order_id:
+        if not existing or existing["input"].get("nearby_order_id") != order_id or existing["input"]["suggested_grams"] != grams:
             raise ValueError("unavailable")
     return draft["id"]

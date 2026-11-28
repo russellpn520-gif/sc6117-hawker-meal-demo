@@ -7,9 +7,9 @@ import streamlit as st
 from device_diary import forget_diary, remember_diary
 from i18n import tr
 from meals import clear_diary, move_workout, planned_days, save_profile
-from planning import (ACTIVITIES, GOALS, SEXES, Profile, TrainingPreferences, calorie_balance,
+from planning import (ACTIVITIES, GOALS, SEXES, THEMES, Profile, TrainingPreferences, calorie_balance,
                       day_plan, move_targets, span, valid_training_move)
-from training_coach import (DAYS, EXERCISES, read_logs, save_training_log, save_training_preferences,
+from training_coach import (DAYS, EXERCISES, WEIGHTED, read_logs, save_training_log, save_training_preferences,
                             session_lines, training_context)
 
 
@@ -51,7 +51,7 @@ BALANCE_EN = {
 
 
 def plan_label(plan):
-    return tr(plan.label, "Training day" if plan.training else "Rest day")
+    return tr(*THEMES[plan.theme if plan.training else "rest"])
 
 
 def activity_label(key):
@@ -177,8 +177,11 @@ def day_summary(profile, today, plan, eaten, *, partial_count=0, legacy_count=0)
                 f"Logged **{eaten['kcal']:.0f} kcal** · Daily target **{span(plan.kcal)} kcal**"))
     st.caption(tr(f"静息代谢约 {span(profile.resting_kcal)} kcal/天 · 每日蛋白质目标 {plan.protein_g} g",
                   f"Estimated resting energy {span(profile.resting_kcal)} kcal/day · Protein target {plan.protein_g} g/day"))
-    copy = ACTIVITY_EN[profile.activity]
-    st.write(tr(tier.advice, copy.training) if plan.training else tr(tier.recovery, copy.rest))
+    st.caption(tr(f"碳水目标 {plan.carb_g} g · 脂肪目标 {plan.fat_g} g",
+                  f"Carb target {plan.carb_g} g · fat target {plan.fat_g} g"))
+    if plan.theme in {"rest", "general"}:
+        copy = ACTIVITY_EN[profile.activity]
+        st.write(tr(tier.advice, copy.training) if plan.training else tr(tier.recovery, copy.rest))
 
 
 def _preview_date(profile, origin, destination, days, diary):
@@ -194,7 +197,9 @@ def _review_date(profile, origin, destination, targets, db_path):
         delta = (tr(f"增加 {change}", f"up {change}") if after.training
                  else tr(f"减少 {change}", f"down {change}"))
         lines.append(f"**{month_day(day)} · {plan_label(after)}**  \n"
-                     f"{span(before.kcal)} → **{span(after.kcal)} kcal** ({delta} kcal)")
+                     f"{span(before.kcal)} → **{span(after.kcal)} kcal** ({delta} kcal)　" +
+                     tr(f"蛋白 {after.protein_g} · 碳水 {after.carb_g} · 脂肪 {after.fat_g} g",
+                        f"Protein {after.protein_g} · Carbs {after.carb_g} · Fat {after.fat_g} g"))
     comparison = "\n\n".join(lines)
     st.markdown("**" + tr("改期后的每日热量目标", "Daily targets after this move") + "**")
     st.markdown(comparison)
@@ -270,34 +275,50 @@ def training_plan(profile, today, days, db_path):
 
 def _strength_panel(profile, today, db_path):
     prefs = profile.training
-    with st.expander(tr("设置力量训练", "Strength training setup"),
+    with st.expander(tr("调整我的课表", "Workout preferences"),
                      expanded=bool(st.session_state.pop("edit_training_setup", False))):
         with st.form("training_availability"):
             labels = {i: tr("周" + name[0], name[1]) for i, name in enumerate(DAYS)}
             weekdays = st.multiselect(tr("一周哪几天有空？", "Which weekdays are available?"), list(labels),
                                       default=list(prefs.weekdays) if prefs else [], format_func=labels.__getitem__)
-            gear = {"bodyweight": tr("徒手", "Bodyweight"), "dumbbells": tr("徒手和哑铃", "Bodyweight and dumbbells")}
-            equipment = st.selectbox(tr("可用器械", "Available equipment"), list(gear), format_func=gear.__getitem__,
-                                     index=int(bool(prefs and prefs.equipment == "dumbbells")))
-            minutes = st.select_slider(tr("每次可用时间（分钟）", "Minutes available per workout"), [10, 20, 30],
+            def choose(label, choices, default):
+                names = {key: tr(*pair) for key, pair in choices.items()}
+                return st.selectbox(tr(*label), list(names), index=list(names).index(default),
+                                    format_func=names.__getitem__)
+
+            equipment = choose(("可用器械", "Available equipment"), {
+                "bodyweight": ("居家徒手", "Bodyweight"), "dumbbells": ("居家哑铃", "Dumbbells"),
+                "gym": ("健身房器械", "Gym equipment")}, prefs.equipment if prefs else "bodyweight")
+            mode = choose(("训练模式", "Training style"), {
+                "strength": ("力量为主", "Strength"), "mixed": ("力量 + 有氧", "Strength + cardio"),
+                "cardio": ("有氧为主", "Cardio")}, (prefs.mode if prefs else None) or "strength")
+            cardio = choose(("有氧日做什么？", "Cardio activity"), {k: THEMES[k] for k in ("run", "swim", "cycle", "walk")},
+                            prefs.cardio if prefs else "run")
+            minutes = st.select_slider(tr("每次可用时间（分钟）", "Minutes available per workout"), [10, 20, 30, 45, 60],
                                        value=prefs.minutes if prefs else 20)
-            st.caption(tr("从今天起安排力量训练，已记过今天的训练则从明天开始。训练间隔恢复日，与新时间冲突的改期会更新。",
-                          "The schedule starts today, or tomorrow if today’s workout is logged. It leaves days for recovery. "
-                          "Earlier reschedules that conflict with the new availability will be updated."))
+            slot = choose(("通常什么时候练？", "Usual workout time"), {
+                None: ("随时", "Flexible"), "morning": ("早上", "Morning"), "afternoon": ("下午", "Afternoon"),
+                "evening": ("傍晚", "Evening")}, prefs.time_slot if prefs else None)
+            st.caption(tr("每个选中的日子安排一节课，之后可以单独改期。", "Each selected day gets a session. You can move individual workouts later."))
             if st.form_submit_button(tr("应用训练安排", "Apply training schedule")):
                 if not weekdays:
                     st.warning(tr("请选择至少一个可训练日。", "Choose at least one available day."))
                 else:
-                    new = TrainingPreferences(equipment=equipment, weekdays=weekdays, minutes=minutes, since=today)
+                    new = TrainingPreferences(equipment=equipment, weekdays=weekdays, minutes=minutes, since=today,
+                                              mode=mode, cardio=cardio, time_slot=slot)
                     save_training_preferences(profile, new, db_path=db_path)
                     st.rerun()
     if not prefs:
         return
     lang = tr("zh", "en")
     context = training_context(profile, today, db_path=db_path, lang=lang)
-    session = next((s for s in context["sessions"] if s["exercises"]), None)
+    with st.expander(tr("未来 7 天课表", "Next 7 days")):
+        for item in context["sessions"]:
+            if item["mode"] != "rest":
+                st.markdown("**" + item["date"] + "** · " + "　".join(session_lines(item, lang)))
+    session = next((s for s in context["sessions"] if s["mode"] != "rest"), None)
     if session:
-        st.markdown("**" + tr("本次力量训练", "Your strength session") + " · " + session["date"] + "**")
+        st.markdown("**" + tr("下一节训练", "Your next workout") + " · " + session["date"] + "**")
         for line in session_lines(session, lang):
             st.write(line)
         st.caption(tr("先轻松热身，组间充分休息，按可用时间结束。有疼痛、孕期或健康状况时请先咨询专业人员。",
@@ -307,6 +328,7 @@ def _strength_panel(profile, today, db_path):
             st.caption(tr("连续两次轻松完成目标后可增加一次重复。漏练后从较轻的训练恢复；连续两次吃力或第四周减量。重量沿用实际记录。",
                           "Two comfortable completions can earn one extra rep. A missed session eases you back in; "
                           "two difficult sessions or week four trigger a lighter session. Weights come from your own log."))
+            st.markdown("[ACSM · Resistance training](https://acsm.org/resistance-training-guidelines-update-2026/) · [CDC · Talk test](https://www.cdc.gov/physical-activity-basics/measuring/)")
             st.markdown("[NHS · Strength exercises](https://www.nhs.uk/live-well/exercise/strength-exercises/)")
     _training_log_ui(profile, today, db_path, lang)
 
@@ -330,7 +352,12 @@ def _training_log_ui(profile, today, db_path, lang):
                               key=f"training-result-{day}")
             with st.form(f"workout-entry-{day}-{status}"):
                 entries = {}
-                if status != "missed":
+                cardio_log = session["mode"] == "cardio" and status != "missed"
+                if cardio_log:
+                    saved = existing.get("actuals", {})
+                    duration = st.number_input(tr("实际分钟", "Actual minutes"), 1, 600, saved.get("minutes", session["planned_minutes"]))
+                    effort = st.slider(tr("体感强度 · 1 很轻松，10 很吃力", "Effort · 1 very easy, 10 very hard"), 1, 10, saved.get("rpe", 4))
+                elif status != "missed":
                     st.caption(tr("每组实做次数用逗号隔开；没做的动作留空。",
                                   "Enter the reps you actually did in each set, separated by commas. Leave skipped exercises blank."))
                     for ex in session["exercises"]:
@@ -340,19 +367,21 @@ def _training_log_ui(profile, today, db_path, lang):
                                              value=", ".join(str(s["reps"]) for s in saved), placeholder="8, 7",
                                              max_chars=100)
                         loads = ""
-                        if key == "curl":
-                            loads = st.text_input(tr("每只哑铃重量（kg，每组一个数或共用一个数）",
-                                                     "Weight per dumbbell (kg, one value or one per set)"),
-                                                  value=", ".join(f"{s['kg']:g}" for s in saved), placeholder="2", max_chars=100)
+                        if key in WEIGHTED:
+                            load_label = tr("每只哑铃重量（kg，每组一个数或共用一个数）",
+                                                     "Weight per dumbbell (kg, one value or one per set)") if key == "curl" else tr("每组使用重量（kg）", "Load per set (kg)")
+                            loads = st.text_input(ex["name"] + " · " + load_label,
+                                                  value=", ".join(f"{s['kg']:g}" for s in saved), placeholder="2", max_chars=100,
+                                                  key=f"log-kg-{day}-{key}")
                         entries[key] = (reps, loads)
                 if st.form_submit_button(tr("保存训练记录", "Save workout log")):
                     try:
-                        actuals = {}
+                        actuals = {"minutes": duration, "rpe": effort} if cardio_log else {}
                         for key, (reps, loads) in entries.items():
                             if not reps.strip():
                                 continue
                             rep_list = [int(v) for v in re.split("[,，]", reps)]
-                            kg_list = [float(v) for v in re.split("[,，]", loads)] if key == "curl" else [0]
+                            kg_list = [float(v) for v in re.split("[,，]", loads)] if key in WEIGHTED else [0]
                             if len(kg_list) == 1:
                                 kg_list *= len(rep_list)
                             if len(kg_list) != len(rep_list):
@@ -368,9 +397,14 @@ def _training_log_ui(profile, today, db_path, lang):
         if recent:
             for record in reversed(recent[-4:]):
                 lines = []
-                for key, sets in record["actuals"].items():
+                actuals = record["actuals"]
+                if "minutes" in actuals:
+                    lines.append(f"{actuals['minutes']} min · RPE {actuals['rpe']}/10")
+                for key, sets in actuals.items():
+                    if key not in EXERCISES:
+                        continue
                     name = EXERCISES[key][lang == "en"]
-                    numbers = ", ".join(f"{s['reps']} × {s['kg']:g} kg" if key == "curl" else str(s["reps"]) for s in sets)
+                    numbers = ", ".join(f"{s['reps']} × {s['kg']:g} kg" if key in WEIGHTED else str(s["reps"]) for s in sets)
                     lines.append(f"{name} ({numbers})")
                 st.caption(record["date"] + " · " + (" / ".join(lines) if lines else tr("漏练", "Missed")))
 
@@ -398,23 +432,15 @@ def settings(profile, db_path, public_demo):
                            "scales this to average daily needs. The default goal is weight maintenance. "
                            "Optional weight goals adjust the average by about 5%. A range uses both sex coefficients. "
                            "[Original study](https://pubmed.ncbi.nlm.nih.gov/2305711/)"))
-            st.markdown(tr("四档综合参考运动频率、训练量与备赛情况，活动系数依次为 1.20、1.375、1.50、1.90。"
-                           "以建档日为起点，每七天保持同一热量预算，训练日与休息日相差约日均预算的 8%。"
-                           "这是演示用的目标分配，专业运动员应按实际训练量校准。",
-                           "The four activity levels use factors of 1.20, 1.375, 1.50 and 1.90. The total energy "
-                           "budget stays the same across each seven-day period starting when you set up your plan. "
-                           "Training and rest days differ by about 8% of the daily average. Competitive athletes "
-                           "should tailor these demo targets to their training load.") +
-                        " [Cronometer](https://support.cronometer.com/hc/en-us/articles/31974307318420-Energy-Expenditure)"
-                        " · [Polar](https://support.polar.com/uk-en/support/what_is_my_training_background)")
-            st.markdown(tr("蛋白质按体重和运动习惯估算，训练日每公斤上调 0.1 g。经常运动且制定力量计划的成年人选择温和增减重时，演示基准为每日每公斤至少 1.3 g。训练建议从熟悉的活动开始。"
-                           " 孕哺期、康复期或有特殊营养需求时，可使用记餐功能，并向专业人员确认个人目标。",
-                           "Protein targets depend on body weight and activity level, with an extra 0.1 g per kg "
-                           "on training days. For regularly active adults using the strength plan with a gradual weight-change goal, "
-                           "the demo uses a starting estimate of at least 1.3 g/kg daily. Start with familiar activities. If you are pregnant, breastfeeding, "
-                           "recovering, or have specific dietary needs, ask a health professional about your goals.") +
-                        " [HealthHub](https://www.healthhub.sg/well-being-and-lifestyle/food-diet-and-nutrition/why_protein_is_important)"
-                        " · [NIH ODS](https://ods.od.nih.gov/factsheets/ExerciseAndAthleticPerformance-HealthProfessional/)")
+            st.markdown(tr("在每周总量内分配热量。力量日和有氧日按训练主题比休息日多分约日均值的 8% 至 10%。",
+                           "Energy is redistributed within each week. Workout days receive about 8–10% of average daily energy more than rest days, depending on the session.") +
+                        " [Cronometer](https://support.cronometer.com/hc/en-us/articles/31974307318420-Energy-Expenditure)")
+            st.markdown(tr("蛋白质基线按体重与日常活动估算。设置分化课表后，力量日参考至少 1.6 g/kg，有氧日至少 1.4 g/kg。"
+                           "热量区间取中点，脂肪约占 26% 至 34%，其余留给碳水。分化比例和每四周减量是本产品的规划规则。",
+                           "Protein starts from body weight and activity level. The split planner uses at least 1.6 g/kg on strength days and 1.4 g/kg on cardio days. "
+                           "At the energy midpoint, fat takes about 26–34% and remaining energy goes to carbs. The session-specific splits and four-week lighter cycle are planning rules.") +
+                        " [NIH ODS](https://ods.od.nih.gov/factsheets/ExerciseandAthleticPerformance-HealthProfessional/)"
+                        " · [DRI](https://www.nationalacademies.org/read/27957/chapter/5)")
         if public_demo:
             if st.session_state.get("device_storage_blocked"):
                 st.caption(tr("浏览器限制了设备存储，本次仅使用当前会话。",

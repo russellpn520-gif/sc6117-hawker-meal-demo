@@ -1,5 +1,6 @@
 """Location choice and nearby dinner cards in the mobile coach."""
 
+from datetime import datetime
 from html import escape
 from math import isfinite
 from pathlib import Path
@@ -9,7 +10,8 @@ import streamlit as st
 
 from coach import _today_values
 from i18n import food_name, tr
-from meals import get_profile, load_foods
+from meal_plan_ui import show_booster
+from meals import SG_TIME, get_profile, load_foods
 from nearby_hawker import (
     LANDMARKS, NEA_SNAPSHOT_DATE, NEA_URL, SEARCH_RADIUS_M, add_nearby_draft, get_landmark,
     recommend_nearby, save_landmark,
@@ -98,16 +100,20 @@ def _show_card(card, request_id, today, db_path):
         <blockquote aria-label="{tr("点单口令", "Order at the stall")}">“{order}”</blockquote>
         <p class="hawker-nutrition">{nutrition}</p>
         <p class="hawker-note">{stall} · {note}</p></div>''')
+        side_key = show_booster(card.get("booster"), totals, request_id)
         with st.container(key=f"hawker_actions_{card['id']}", horizontal=True, gap="xsmall"):
             st.link_button(tr("Google Maps 怎么走", "Google Maps directions"), card["maps_url"], width="stretch")
-            if st.button(tr("今晚就吃这个（加入草稿）", "Add to meal draft"), key=f"radar_add_{request_id}", type="primary", width="stretch"):
+            if st.button(tr("这顿就吃这个（加入草稿）", "Add to meal draft"), key=f"radar_add_{request_id}", type="primary", width="stretch"):
                 try:
-                    return add_nearby_draft(db_path, card["id"], today, draft_id=request_id)
+                    return add_nearby_draft(db_path, card["id"], today, draft_id=request_id, side_key=side_key,
+                                            evening=datetime.now(SG_TIME).hour >= 17)
                 except ValueError as exc:
                     if str(exc) != "unavailable":
                         raise
                     st.info(tr("这份搭配已不符合当前偏好或休业安排，请重新选。", "This order no longer fits your preferences or the closure schedule. Choose another."))
         with st.expander(tr("参考份量与来源", "Portions and sources")):
+            st.caption(tr(f"主餐碳水 {totals['carb_g']:.1f} g · 脂肪 {totals['fat_g']:.1f} g",
+                          f"Main · carbs {totals['carb_g']:.1f} g · fat {totals['fat_g']:.1f} g"))
             for item in card["items"]:
                 name = food_name(load_foods()[item["food_id"]])
                 st.markdown(f"[{name} · {item['confirmed_g']} g]({item['source_url']})")
@@ -119,7 +125,7 @@ def _show_card(card, request_id, today, db_path):
     return None
 
 
-def nearby_dinner(state, today, db_path, budget_sgd=None):
+def nearby_dinner(state, today, db_path, budget_sgd=None, target=None):
     """Return the new pending meal id only when an order is chosen."""
     radar = state.setdefault("radar", {})
     with st.container(key="hawker_radar", gap="small"):
@@ -138,9 +144,11 @@ def nearby_dinner(state, today, db_path, budget_sgd=None):
         known_balance = rows and plan and not partial
         remaining_kcal = max(0, plan.kcal[0] - eaten["kcal"]) if known_balance else None
         remaining_protein = max(0, plan.protein_g - eaten["protein_g"]) if known_balance else None
+        limits = [x for x in (prefs.budget_cents if prefs else None, budget_cents(budget_sgd)) if x is not None]
         options = recommend_nearby(coords, today, preferences=prefs, remaining_kcal=remaining_kcal,
                                    remaining_protein=remaining_protein, training=bool(plan and plan.training),
-                                   page=radar.get("page", 0))
+                                   page=radar.get("page", 0), target=target, budget_limit=min(limits, default=None),
+                                   evening=datetime.now(SG_TIME).hour >= 17)
         with location_bar:
             st.caption(origin)
             if options["total"] > 3:
@@ -149,7 +157,6 @@ def nearby_dinner(state, today, db_path, budget_sgd=None):
                     radar["page"] = (radar.get("page", 0) + 1) % count
 
                 st.button(tr("换一批 ↻", "More picks ↻"), key="hawker_next", on_click=next_set)
-        limits = [x for x in (prefs.budget_cents if prefs else None, budget_cents(budget_sgd)) if x is not None]
         if limits:
             cap = min(limits) / 100
             st.caption(tr(f"预算 S${cap:.2f}，点单时请看档口菜单。", f"Budget S${cap:.2f}. Check the price at the stall."))
@@ -164,8 +171,8 @@ def nearby_dinner(state, today, db_path, budget_sgd=None):
                           f"This date is outside the saved schedule. Check [NEA cleaning dates]({NEA_URL}) before heading out."))
         if not options["cards"]:
             radius = SEARCH_RADIUS_M / 1000
-            st.write(tr(f"这里 {radius:g} 公里内，收录的档口暂时没有符合条件的晚餐。可以换个地标，或查看上方饮食偏好。",
-                        f"No matching dinner among the listed stalls within {radius:g} km. Try another landmark or review your preferences above."))
+            st.write(tr(f"这里 {radius:g} 公里内，收录的档口暂时没有符合条件的餐食。可以换个地标，或查看上方饮食偏好。",
+                        f"No matching meal among the listed stalls within {radius:g} km. Try another landmark or review your preferences above."))
         keys = radar.setdefault("draft_ids", {})
         for card in options["cards"]:
             if card["id"] not in keys:

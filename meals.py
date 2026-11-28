@@ -113,6 +113,7 @@ def open_db(db_path=None):
         );
         CREATE INDEX IF NOT EXISTS meals_by_day ON meals(day);
         CREATE TABLE IF NOT EXISTS workouts (day TEXT PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS workout_moves (day TEXT PRIMARY KEY, original_day TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS rest_days (day TEXT PRIMARY KEY);
         CREATE TABLE IF NOT EXISTS profile (id INTEGER PRIMARY KEY CHECK(id = 1), data TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS photo_access (id INTEGER PRIMARY KEY CHECK(id = 1), proof TEXT NOT NULL);
@@ -426,7 +427,12 @@ def _planned_days(db, profile, start, end):
     bounds = (start.isoformat(), end.isoformat())
     days.update(date.fromisoformat(d) for d, in db.execute("SELECT day FROM workouts WHERE day BETWEEN ? AND ?", bounds))
     days.difference_update(date.fromisoformat(d) for d, in db.execute("SELECT day FROM rest_days WHERE day BETWEEN ? AND ?", bounds))
-    return days
+    from planning import TrainingCalendar, training_theme
+    themes = {}
+    for d, source in db.execute("SELECT day, original_day FROM workout_moves WHERE day BETWEEN ? AND ?", bounds):
+        original = date.fromisoformat(source)
+        themes[date.fromisoformat(d)] = training_theme(profile, original, {original})
+    return TrainingCalendar(days, themes)
 
 
 def planned_days(profile, start, end, *, db_path=None):
@@ -456,8 +462,14 @@ def move_workout(profile, origin, destination, *, db_path=None, require_current_
         if expected_targets is not None and move_targets(profile, origin, destination, active) != expected_targets:
             return False
         old, new = (origin.isoformat(),), (destination.isoformat(),)
+        previous = db.execute("SELECT original_day FROM workout_moves WHERE day=?", old).fetchone()
+        source = previous[0] if previous else old[0]
+        db.execute("DELETE FROM workout_moves WHERE day=?", old)
+        if new[0] != source:
+            db.execute("INSERT OR REPLACE INTO workout_moves VALUES (?,?)", (*new, source))
         db.execute("DELETE FROM workouts WHERE day = ?", old)
-        db.execute("INSERT OR IGNORE INTO rest_days VALUES (?)", old)
+        if profile.scheduled_by_default(origin):
+            db.execute("INSERT OR IGNORE INTO rest_days VALUES (?)", old)
         db.execute("DELETE FROM rest_days WHERE day = ?", new)
         db.execute("INSERT OR IGNORE INTO workouts VALUES (?)", new)
         return True
@@ -468,6 +480,7 @@ def clear_diary(*, db_path=None):
         db.execute("DELETE FROM pending")
         db.execute("DELETE FROM discarded")
         db.execute("DELETE FROM meals")
+        db.execute("DELETE FROM workout_moves")
         db.execute("DELETE FROM workouts")
         db.execute("DELETE FROM rest_days")
         db.execute("DELETE FROM profile")

@@ -6,7 +6,8 @@ from dataclasses import asdict, dataclass
 from decimal import Decimal, InvalidOperation, ROUND_FLOOR
 from math import ceil, isfinite
 
-from meals import load_foods, open_db, portion_items, total_nutrients
+from meal_targets import fit_score, vegetable_grams
+from meals import create_pending, get_pending, make_draft, load_foods, open_db, portion_items, total_nutrients
 
 
 DIETS = {
@@ -28,7 +29,7 @@ ALLERGENS = {
 class Ingredient:
     food_id: str
     names: tuple
-    cents_per_100g: int  # Assumed SGD cents per 100 g of edible shopping weight.
+    cents_per_100g: int | None  # Assumed SGD cents per 100 g of edible shopping weight.
     yield_pct: int       # Served grams per 100 g of edible shopping weight.
     kind: str
     allergens: tuple
@@ -38,6 +39,8 @@ class Ingredient:
 # Quantities in the recipes are cooked/as-served weights and match the source food.
 # Prices and cooking yields are local demo assumptions, never retailer quotations.
 INGREDIENTS = {
+    "soy_milk": Ingredient("fdc-2705405", ("无糖豆浆", "Unsweetened soy milk"), None, 100, "plant", ("soy",)),
+    "yogurt": Ingredient("fdc-170894", ("原味无脂希腊酸奶", "Plain nonfat Greek yogurt"), None, 100, "dairy", ("milk",)),
     "rice": Ingredient("fdc-168878", ("干白米", "Dry white rice"), 28, 270, "plant", ()),
     "chicken": Ingredient("fdc-171478", ("去骨鸡胸", "Boneless chicken breast"), 155, 75, "meat", ()),
     "fish": Ingredient("fdc-175177", ("罗非鱼柳", "Tilapia fillet"), 225, 80, "fish", ("fish",)),
@@ -177,13 +180,13 @@ def _dinner_fit(totals, remaining_kcal, remaining_protein):
 
 def _allows(key, prefs):
     ingredient = INGREDIENTS.get(key)
-    allowed_kinds = {"any": {"plant", "egg", "fish", "meat"}, "vegan": {"plant"},
-                     "vegetarian": {"plant", "egg"}, "pescatarian": {"plant", "egg", "fish"}}[prefs.diet]
+    allowed_kinds = {"any": {"plant", "egg", "fish", "meat", "dairy"}, "vegan": {"plant"},
+                     "vegetarian": {"plant", "egg", "dairy"}, "pescatarian": {"plant", "egg", "fish", "dairy"}}[prefs.diet]
     return (ingredient is not None and ingredient.kind in allowed_kinds and key not in prefs.avoid
             and not set(prefs.allergies or ()).intersection(ingredient.allergens))
 
 
-def plan_dinner(preferences, *, remaining_kcal=None, remaining_protein=None, budget_sgd=None, recipe_name=None):
+def plan_dinner(preferences, *, remaining_kcal=None, remaining_protein=None, budget_sgd=None, recipe_name=None, target=None):
     if not _valid(preferences) or preferences.other_restriction.strip() or "other" in (preferences.allergies or ()):
         return None
     limit = preferences.budget_cents
@@ -207,7 +210,10 @@ def plan_dinner(preferences, *, remaining_kcal=None, remaining_protein=None, bud
         portions = portion_items(foods, {item.food_id: grams for _, item, grams in ingredients})
         totals = total_nutrients([part["nutrients"] for part in portions])
         # Targets rank feasible dinners; a small remainder never forces a tiny serving.
-        score = _dinner_fit(totals, remaining_kcal, remaining_protein)
+        score = (fit_score(target, totals, vegetable_grams(portions)) if target else
+                 _dinner_fit(totals, remaining_kcal, remaining_protein))
+        if target and limit:
+            score += .3 * cost / limit
         choices.append((score, cost, {"recipe": recipe, "shopping": shopping, "cost_cents": cost,
                                      "limit_cents": limit, "nutrients": totals, "items": portions}))
     return min(choices, key=lambda choice: choice[:2])[2] if choices else None
@@ -280,28 +286,37 @@ def _outside_dinner(prefs, lang, remaining_kcal, remaining_protein, budget_sgd):
 
 
 def dinner_result(db_path, *, lang="zh", remaining_kcal=None, remaining_protein=None,
-                  shopping=False, budget_sgd=None, recipe_name=None, mode="home"):
+                  shopping=False, budget_sgd=None, recipe_name=None, mode="home", target=None, side_key=None):
     en = lang == "en"
     index = int(en)
     prefs = get_preferences(db_path) or Preferences(None, "any", None)
     if prefs.other_restriction.strip() or "other" in (prefs.allergies or ()):
-        return ("Your restrictions go beyond the ingredients we can check. A verified dinner and shopping list are unavailable."
-                if en else "你有目前食材表无法核实的过敏或忌口。这次没有可核实的晚餐和购物单。"), None
+        return ("Your restrictions go beyond the ingredients we can check. A verified meal and shopping list are unavailable."
+                if en else "你有目前食材表无法核实的过敏或忌口。这次没有可核实的餐食和购物单。"), None
     if mode == "out":
         text, sources = _outside_dinner(prefs, lang, remaining_kcal, remaining_protein, budget_sgd)
         if prefs.allergies is None:
             text += "\n\n" + ("Allergies not provided." if en else "过敏信息未填写。")
         return text, {"reference_portions": sources} if sources else None
     plan = plan_dinner(prefs, remaining_kcal=remaining_kcal, remaining_protein=remaining_protein,
-                       budget_sgd=budget_sgd, recipe_name=recipe_name)
+                       budget_sgd=budget_sgd, recipe_name=recipe_name, target=target)
     if not plan:
         if recipe_name is not None:
-            return ("This dinner no longer fits your saved preferences or budget. Choose a new dinner."
-                    if en else "这份晚餐已不符合当前饮食偏好或预算，请重新选择晚餐。"), None
-        return ("No dinner in the current recipe list meets this budget and all your food restrictions."
-                if en else "现有餐单中没有同时符合本次预算、过敏要求和忌口的一人份晚餐。"), None
+            return ("This meal no longer fits your saved preferences or budget. Choose a new meal."
+                    if en else "这份餐食已不符合当前饮食偏好或预算，请重新选择餐食。"), None
+        return ("No meal in the current recipe list meets this budget and all your food restrictions."
+                if en else "现有餐单中没有同时符合本次预算、过敏要求和忌口的一人份餐食。"), None
     recipe, totals = plan["recipe"], plan["nutrients"]
-    cost = f"S${plan['cost_cents'] / 100:.2f}"
+    selected_side = None
+    if shopping and side_key:
+        cap = plan["limit_cents"]
+        room = cap - plan["cost_cents"] if cap is not None else None
+        selected_side = next((s for s in side_options(prefs, room) if s["key"] == side_key), None)
+        if not selected_side:
+            return ("Your saved side no longer fits. Choose the meal again." if en else "原先的加配已不符合当前条件，请重新选餐。"), None
+        totals = total_nutrients([totals, selected_side["totals"]])
+    cost_cents = plan["cost_cents"] + ((selected_side["cost_cents"] or 0) if selected_side else 0)
+    cost = f"S${cost_cents / 100:.2f}"
     limit = f"S${plan['limit_cents'] / 100:.2f}" if plan["limit_cents"] is not None else None
     title = recipe.names[index]
     price = f"One serving · ingredients about {cost}" if en else f"一人份 · 食材约 {cost}"
@@ -317,6 +332,11 @@ def dinner_result(db_path, *, lang="zh", remaining_kcal=None, remaining_protein=
             item = INGREDIENTS[key]
             weight = (f"{grams // 50} eggs" if en else f"{grams // 50} 个") if key == "egg" else f"{grams} g"
             rows.append(f"- {item.names[index]} · {weight} · S${cents / 100:.2f} (S${item.cents_per_100g / 100:.2f}/100 g)")
+        if selected_side:
+            source = selected_side["items"][0]
+            rows.append(f"- [{selected_side['names'][index]} · {source['confirmed_g']} g]({source['source_url']})")
+            if selected_side["cost_cents"] is None:
+                rows.append("Side price to check separately." if en else "加配价格请另查商品标签。")
         lines.append("\n".join(rows))
     else:
         names = []
@@ -341,3 +361,81 @@ def dinner_result(db_path, *, lang="zh", remaining_kcal=None, remaining_protein=
 
 def dinner_reply(db_path, **options):
     return dinner_result(db_path, **options)[0]
+
+
+# Names refer to edible, as-served portions of the exact catalogue entry.
+SIDES = {
+    "soy_milk": (("一杯无糖豆浆", "Cup of unsweetened soy milk"), 244),
+    "yogurt": (("一杯原味希腊酸奶", "Plain nonfat Greek yogurt"), 170),
+    "egg": (("两颗水煮蛋", "Two boiled eggs"), 100),
+    "chicken": (("一份熟鸡胸肉", "Cooked chicken breast"), 90),
+    "tofu": (("一份原味硬豆腐", "Plain firm tofu"), 130),
+    "chickpea": (("一小碗熟鹰嘴豆", "Small bowl of cooked chickpeas"), 120),
+    "sweet_potato": (("一个熟红薯", "Cooked sweet potato"), 150),
+}
+
+
+def side_options(prefs, limit=None):
+    if not _valid(prefs) or prefs.other_restriction.strip() or "other" in (prefs.allergies or ()):
+        return []
+    options = []
+    for key, (names, weight) in SIDES.items():
+        if not _allows(key, prefs):
+            continue
+        ingredient = INGREDIENTS[key]
+        cost = _purchase(ingredient, weight)[1] if ingredient.cents_per_100g is not None else None
+        if limit is not None and (cost is None or cost > limit):
+            continue
+        items = portion_items(load_foods(), {ingredient.food_id: weight})
+        options.append(dict(key=key, names=names, items=items, totals=items[0]["nutrients"], cost_cents=cost))
+    return options
+
+
+def choose_booster(target, main, prefs, limit=None):
+    if target.mode != "one" or not target.amounts:
+        return None
+    p = target.amounts["protein_g"] - main["protein_g"]
+    k = target.amounts["kcal"] - main["kcal"]
+    if p < 18 and k < 350:
+        return None
+    def benefit(side):
+        n = side["totals"]
+        return (min(max(p, 0), n["protein_g"]) / 14 + min(max(k, 0), n["kcal"]) / 200
+                - max(0, n["kcal"] - max(k, 0)) / 500)
+    return max(side_options(prefs, limit), key=benefit, default=None)
+
+
+def checked_side_grams(key, prefs, limit=None):
+    side = next((s for s in side_options(prefs, limit) if s["key"] == key), None)
+    if not side:
+        raise ValueError("unavailable")
+    item = side["items"][0]
+    return item["food_id"], item["confirmed_g"]
+
+
+def add_planned_draft(db_path, name, grams, request_id):
+    draft = make_draft("text", name, grams, [])
+    draft.update(id=request_id, status="ready")
+    if not create_pending(draft, db_path=db_path):
+        previous = get_pending(request_id, db_path=db_path)
+        if not previous or previous["input"]["suggested_grams"] != grams:
+            raise ValueError("unavailable")
+    return request_id
+
+
+def add_home_draft(db_path, recipe_name, side_key, request_id, budget_sgd=None):
+    prefs = get_preferences(db_path) or Preferences(None, "any", None)
+    if recipe_name is None:
+        cap = budget_cents(budget_sgd)
+        limits = [x for x in (cap, prefs.budget_cents) if x is not None]
+        food, weight = checked_side_grams(side_key, prefs, min(limits, default=None))
+        return add_planned_draft(db_path, SIDES[side_key][0][1], {food: weight}, request_id)
+    plan = plan_dinner(prefs, recipe_name=recipe_name, budget_sgd=budget_sgd)
+    if not plan:
+        raise ValueError("unavailable")
+    grams = {p["food_id"]: p["confirmed_g"] for p in plan["items"]}
+    if side_key:
+        limit = plan["limit_cents"]
+        food, weight = checked_side_grams(side_key, prefs, limit - plan["cost_cents"] if limit is not None else None)
+        grams[food] = grams.get(food, 0) + weight
+    return add_planned_draft(db_path, recipe_name, grams, request_id)

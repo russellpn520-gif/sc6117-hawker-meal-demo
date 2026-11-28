@@ -51,6 +51,23 @@ def language_switch():
 
 
 SHORT_NAMES = {
+    "fdc-170894": ("原味无脂希腊酸奶", "Plain nonfat Greek yogurt"),
+    "fdc-171478": ("熟鸡胸肉", "Stewed chicken breast"),
+    "fdc-173424": ("水煮蛋", "Hard-boiled egg"),
+    "fdc-2707416": ("熟鹰嘴豆", "Cooked chickpeas"),
+    "fdc-2709699": ("烤红薯", "Baked sweet potato"),
+    "fdc-168878": ("熟白米饭", "Cooked white rice"),
+    "fdc-175177": ("熟罗非鱼", "Cooked tilapia"),
+    "fdc-169231": ("鲜姜", "Fresh ginger"),
+    "fdc-169967": ("熟西兰花", "Cooked broccoli"),
+    "fdc-2707361": ("熟黑豆", "Cooked black beans"),
+    "fdc-170457": ("番茄", "Tomato"),
+    "fdc-2710186": ("橄榄油", "Olive oil"),
+    "fdc-168917": ("熟藜麦", "Cooked quinoa"),
+    "fdc-2709784": ("黄瓜", "Cucumber"),
+    "fdc-172421": ("熟扁豆", "Cooked lentils"),
+    "fdc-168928": ("熟小麦意面", "Cooked wheat pasta"),
+    "fdc-2709593": ("熟青菜", "Cooked greens"),
     "cofid-18-374": ("烧鸭（带皮）", "Roast duck with skin"),
     "fdc-167863": ("焖猪肝", "Braised pork liver"),
     "fdc-168233": ("烤猪里脊（瘦肉）", "Lean roast pork loin"),

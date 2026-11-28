@@ -37,9 +37,13 @@ SEXES = {"female": "女性", "male": "男性"}
 class TrainingPreferences(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    equipment: Literal["bodyweight", "dumbbells"] = "bodyweight"
+    equipment: Literal["bodyweight", "dumbbells", "gym"] = "bodyweight"
     weekdays: tuple[int, ...] = Field(min_length=1, max_length=7)
-    minutes: Literal[10, 20, 30] = 20
+    minutes: Literal[10, 20, 30, 45, 60] = 20
+    # Profiles saved before split programming retain their existing appointments.
+    mode: Literal["strength", "cardio", "mixed"] | None = None
+    cardio: Literal["run", "swim", "cycle", "walk"] = "run"
+    time_slot: Literal["morning", "afternoon", "evening"] | None = None
     since: date
 
     @field_validator("weekdays")
@@ -49,8 +53,33 @@ class TrainingPreferences(BaseModel):
             raise ValueError("Choose distinct weekdays from Monday (0) to Sunday (6).")
         return tuple(sorted(days))
 
+    def weekly_sessions(self, activity):
+        if self.mode is None:
+            return dict.fromkeys(self.strength_days(activity), "general")
+        days = self.weekdays
+        if self.mode == "cardio":
+            return dict.fromkeys(days, self.cardio)
+        # In mixed schedules spread cardio through the week; for a single available
+        # day finish the full-body workout with a short aerobic block.
+        cardio_indices = ({len(days) - 1} if self.mode == "mixed" and len(days) >= 2 else set())
+        if self.mode == "mixed" and len(days) >= 5:
+            cardio_indices.add(2)
+        n = len(days) - len(cardio_indices)
+        splits = {1: ("full",), 2: ("upper", "lower"), 3: ("push", "pull", "legs")}
+        split = splits.get(n, ("chest", "back", "legs", "core"))
+        i, result = 0, {}
+        for index, day in enumerate(days):
+            if index in cardio_indices:
+                result[day] = self.cardio
+            else:
+                result[day] = split[i % len(split)]
+                i += 1
+        return result
+
     def strength_days(self, activity):
         """Choose the most spread-out available days, including Sunday/Monday recovery."""
+        if self.mode is not None:
+            return tuple(d for d, theme in self.weekly_sessions(activity).items() if theme not in CARDIO)
         limit = min(3, len(ACTIVITIES[activity].training_offsets), len(self.weekdays))
         for count in range(limit, 0, -1):
             best = None
@@ -69,6 +98,8 @@ def valid_training_move(profile, origin, destination, neighbors):
     prefs = profile.training
     if not prefs or destination < prefs.since:
         return True
+    if prefs.mode is not None:
+        return destination >= prefs.since
     return (destination.weekday() in prefs.weekdays
             and destination - timedelta(days=1) not in neighbors
             and destination + timedelta(days=1) not in neighbors)
@@ -115,8 +146,36 @@ class Profile(BaseModel):
 
     def scheduled_by_default(self, day):
         if prefs := self.training_for(day):
-            return day.weekday() in prefs.strength_days(self.activity)
+            return day.weekday() in prefs.weekly_sessions(self.activity)
         return day >= self.start and (day - self.start).days % 7 in ACTIVITIES[self.activity].training_offsets
+
+
+THEMES = {
+    "rest": ("休息日", "Rest day"), "general": ("训练日", "Training day"),
+    "full": ("全身力量", "Full body"), "upper": ("上肢 · 胸背肩", "Upper body · chest, back, shoulders"),
+    "lower": ("下肢 · 腿臀", "Lower body"), "push": ("推 · 胸肩与三头", "Push · chest and shoulders"),
+    "pull": ("拉 · 背与二头", "Pull · back and biceps"), "legs": ("腿臀日", "Legs and glutes"),
+    "chest": ("胸肩日", "Chest and shoulders"), "back": ("练背日", "Back and arms"),
+    "core": ("核心与综合", "Core and conditioning"), "run": ("跑步有氧", "Running"),
+    "swim": ("游泳有氧", "Swimming"), "cycle": ("骑行有氧", "Cycling"), "walk": ("快走有氧", "Brisk walking"),
+}
+CARDIO = {"run", "swim", "walk", "cycle"}
+LARGE = {"pull", "back", "legs", "lower", "full"}
+
+
+class TrainingCalendar(set):
+    def __init__(self, days, themes=None):
+        super().__init__(days)
+        self.themes = themes or {}
+
+
+def training_theme(profile, day, active):
+    if day not in active:
+        return "rest"
+    if theme := getattr(active, "themes", {}).get(day):
+        return theme
+    prefs = profile.training_for(day)
+    return prefs.weekly_sessions(profile.activity).get(day.weekday(), "general") if prefs else "general"
 
 
 @dataclass(frozen=True)
@@ -124,6 +183,10 @@ class DayPlan:
     training: bool
     kcal: tuple[int, int]
     protein_g: int
+    carb_g: int = 0
+    fat_g: int = 0
+    theme: str = "general"
+    time_slot: str | None = None
 
     @property
     def label(self):
@@ -133,20 +196,32 @@ class DayPlan:
 def day_plan(profile, day, training_days):
     """Distribute a seven-day maintenance budget without adding exercise twice."""
     start = profile.week_start(day)
-    count = sum(start <= d < start + timedelta(days=7) for d in training_days)
+    theme = training_theme(profile, day, training_days)
     training = day in training_days
     tier = ACTIVITIES[profile.activity]
+    week_themes = [training_theme(profile, d, training_days) for d in training_days
+                   if start <= d < start + timedelta(days=7)]
     targets = []
     for resting in profile.resting_kcal:
         average = round(resting * tier.pal * profile.goal_factor)
         step = round(average * 0.08 / 7)
-        targets.append(average + (7 * int(training) - count) * step)
+        # Transfer integer energy units between dates, preserving the weekly total.
+        uplift = {t: round(step * 1.25) if t in LARGE or t in CARDIO else step for t in THEMES}
+        uplift["rest"] = 0
+        targets.append(average + 7 * uplift[theme] - sum(uplift[t] for t in week_themes))
     coefficient = max(tier.protein_per_kg, 1.2 if profile.age >= 50 else 0.8)
     if profile.training_for(day) and profile.activity == "regular" and profile.goal_factor != 1:
         # A small demo adjustment for regular strength training during a weight-change goal.
         coefficient = max(coefficient, 1.3)
     protein = round(profile.weight_kg * (coefficient + (0.1 if training else 0)))
-    return DayPlan(training, tuple(targets), protein)
+    prefs = profile.training_for(day)
+    if prefs and prefs.mode and training:
+        protein = round(profile.weight_kg * max(coefficient, 1.4 if theme in CARDIO else 1.6))
+    energy = sum(targets) / 2
+    fat_share = 0.26 if theme in CARDIO else 0.28 if theme in LARGE else 0.30 if training else 0.34
+    fat = max(0, round(energy * fat_share / 9))
+    carbs = max(0, round((energy - protein * 4 - fat * 9) / 4))
+    return DayPlan(training, tuple(targets), protein, carbs, fat, theme, prefs.time_slot if prefs and training else None)
 
 
 def span(values):
@@ -155,7 +230,9 @@ def span(values):
 
 
 def move_targets(profile, origin, destination, active):
-    proposed = (active - {origin}) | {destination}
+    themes = dict(getattr(active, "themes", {}))
+    themes[destination] = training_theme(profile, origin, active)
+    proposed = TrainingCalendar((active - {origin}) | {destination}, themes)
     return tuple((day_plan(profile, day, active), day_plan(profile, day, proposed))
                  for day in (origin, destination))
 

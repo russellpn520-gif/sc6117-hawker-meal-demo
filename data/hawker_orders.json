@@ -789,6 +789,7 @@
     },
     {
       "id": "nus-utown-wagyu",
+      "online_menu_cents": 2290,
       "venue": "utownsrc",
       "source": "utown_wagyu",
       "stall": ["Waa Cow! 牛肉饭", "Waa Cow! beef bowls"],

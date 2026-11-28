@@ -19,7 +19,7 @@ from meals import (
     list_meals, list_pending,
     load_foods, make_draft, match_text, save_meal, total_nutrients, update_pending,
 )
-from mobile_ui import apply_mobile_style, coverage_status, day_strip, diary_rhythm, meal_history, saved_receipt
+from mobile_ui import apply_mobile_style, coverage_status, day_strip, diary_rhythm, meal_history, meal_time, saved_receipt
 from photo_tasks import start_recognition
 from plan_ui import calendar_for_view, day_summary, profile_form, settings, training_plan
 from planning import day_plan
@@ -150,7 +150,7 @@ def review_pending(draft, db_path, public_demo):
                 return
             if saved:
                 st.session_state.receipt = {
-                    "totals": total_nutrients([i["nutrients"] for i in items]), "date": draft["captured_at"][:10],
+                    "id": draft["id"], "totals": total_nutrients([i["nutrients"] for i in items]), "date": draft["captured_at"][:10],
                     "input": payload["input"], "items": items, "confirmed_on": datetime.now(SG_TIME).date().isoformat(),
                 }
             else:
@@ -238,11 +238,14 @@ def home(db_path, public_demo, today, profile, plan, eaten, records, partial_cou
     just_saved = bool(receipt and receipt.get("confirmed_on", receipt["date"]) == today.isoformat())
     if records or just_saved:
         with st.container(key="home_after"):
-            saved_receipt(receipt if just_saved else records[0], just_saved=just_saved)
+            ordered = sorted(records, key=lambda r: (meal_time(r), r["id"]))
+            shown = receipt if just_saved else ordered[-1]
+            number = next((i for i, r in enumerate(ordered, 1) if r["id"] == shown.get("id")), None)
+            saved_receipt(shown, just_saved=just_saved, number=number)
             if just_saved and receipt["date"] != today.isoformat():
                 st.caption(tr(f"用餐日期 {receipt['date']}", f"Meal date · {receipt['date']}"))
-            day_strip(today, plan, eaten, len(records), partial_count, legacy_count)
-            st.button(tr("看晚餐建议", "Plan dinner"), on_click=open_dinner, key="home_dinner",
+            day_strip(today, plan, eaten, len(records), partial_count, legacy_count, records)
+            st.button(tr("下一顿吃什么", "Plan next meal"), on_click=open_dinner, key="home_dinner",
                       type="primary", width="stretch")
         now = datetime.now(SG_TIME)
         next_meal = next_meal_due(records, now)

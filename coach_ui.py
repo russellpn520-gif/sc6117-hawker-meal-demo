@@ -17,7 +17,7 @@ _ACTIONS = {
     "today": ("今日进度", "Today’s progress"),
     "week": ("最近七天的日记", "Last seven days"),
     "training": ("我的训练", "My workout"),
-    "dinner": ("晚餐建议", "Dinner ideas"),
+    "dinner": ("下一顿吃什么", "Plan next meal"),
     "move": ("训练改期", "Move a workout"),
     "shopping": ("购物清单", "Shopping list"),
 }
@@ -65,15 +65,19 @@ def _show_reply(state, today, db_path):
     if turn.get("added_to_diary_draft"):
         return
     reply = turn["reply"]
-    if "dinner_mode" in reply:
+    from meal_plan_ui import local_card, target_control
+    planning = "dinner_mode" in reply and not reply.get("shopping") and turn.get("quick") != "shopping"
+    target = target_control(state, today, db_path) if planning else None
+    snack = bool(target and target.mode == "snack")
+    if "dinner_mode" in reply and not snack:
         from nutrition_coach import save_dinner_mode
 
         modes = {"out": tr("在外吃", "Eat out"), "home": tr("自己做", "Cook at home")}
         lang = st.session_state.get("ui_lang", "zh")
         selected = reply["dinner_mode"]
         if selected is None:
-            st.markdown("**" + tr("今晚准备在哪儿吃？", "Where are you having dinner?") + "**")
-        choice = st.segmented_control(tr("用餐方式", "Dinner setting"), list(modes),
+            st.markdown("**" + tr("下一顿想在哪儿吃？", "Where would you like to eat?") + "**")
+        choice = st.segmented_control(tr("用餐方式", "Meal setting"), list(modes),
                                       format_func=modes.__getitem__, default=selected, required=bool(selected),
                                       label_visibility="collapsed", key=f"mituan_dinner_mode_{lang}_{selected}")
         if choice in modes and choice != selected:
@@ -82,27 +86,29 @@ def _show_reply(state, today, db_path):
             st.rerun()
         if selected is None and turn["quick"] == "dinner":
             return
-    else:
+    elif not planning:
         st.text(turn["question"])
-    nearby = reply.get("dinner_mode") == "out"
-    if not nearby or any(t != "PlanDinner" for t in reply.get("tool_names", [])):
+    nearby = planning and reply.get("dinner_mode") == "out" and not snack
+    local = planning and (reply.get("dinner_mode") == "home" or snack)
+    mixed_reply = any(t != "PlanDinner" for t in reply.get("tool_names", []))
+    if (not nearby and not local) or mixed_reply:
         st.markdown(reply["text"])
+    draft_id = None
     if nearby:
         from nearby_ui import nearby_dinner
-
-        draft_id = nearby_dinner(state, today, db_path, reply.get("dinner_budget_sgd"))
-        if draft_id:
-            turn["added_to_diary_draft"] = True
-            st.session_state.active_draft = draft_id
-            st.session_state.section = "记餐"
-            st.session_state.edit_profile = False
-            st.session_state.pop("receipt", None)
-            _close()
-            st.rerun()
-    elif sources := reply.get("dinner_references"):
-        with st.expander(tr("查看参考份量与来源", "Reference portions and sources")):
-            for source in sources:
-                st.markdown(f"[{source['name']} · {source['grams']} g]({source['source_url']})")
+        draft_id = nearby_dinner(state, today, db_path, reply.get("dinner_budget_sgd"), target)
+    elif local:
+        draft_id, context = local_card(state, target, db_path, reply.get("dinner_budget_sgd"))
+        reply["meal_context"] = dict(context, day=today.isoformat()) if context else None
+    if draft_id:
+        turn["added_to_diary_draft"] = True
+        st.session_state.active_draft = draft_id
+        st.session_state.section = "记餐"
+        st.session_state.edit_profile = False
+        st.session_state.pop("receipt", None)
+        state.pop("local_draft_ids", None)
+        _close()
+        st.rerun()
     tools_used = reply.get("tool_names", [])
     followups = []
     if turn["quick"] == "today" or ("ReadDiary" in tools_used and turn["quick"] != "week"):
@@ -123,8 +129,8 @@ def _show_reply(state, today, db_path):
             saved, message = confirm_move(origin, destination, today=today, db_path=db_path, expected_targets=reply.get("move_targets"),
                                           lang=st.session_state.get("ui_lang", "zh"))
             if saved and reply.get("meal_context"):
-                message += tr(" 热量目标已更新。再问一次晚餐，就能看到新建议和购物清单。",
-                              " Your calorie targets changed. Ask for dinner again for an updated meal and shopping list.")
+                message += tr(" 热量目标已更新。再看看下一顿，就能看到新建议和购物清单。",
+                              " Your calorie targets changed. Plan your next meal for an updated meal and shopping list.")
             turn["reply"] = {"text": message}
             st.rerun()
     if reply.get("show_training_setup"):
@@ -179,12 +185,12 @@ def _greeting(today, db_path):
         return tr("这餐在待确认里。慢慢吃，吃完再调份量。", "Your meal is waiting in drafts. Enjoy it and confirm your portions afterwards.")
     rows, _, _, plan = _today_values(get_profile(db_path=db_path), today, db_path)
     if rows and timedelta() <= datetime.now(SG_TIME) - rows[0]["at"] < timedelta(minutes=30):
-        return tr("这餐记好啦。晚餐想在附近吃点什么？", "Meal’s in the diary. Shall we find something nearby for dinner?")
+        return tr("这餐记好啦。下一顿想在附近吃点什么？", "Meal’s in the diary. Shall we plan your next meal?")
     if plan and plan.training:
         return tr("今天有训练。要看看动作，还是把训练挪一天？", "There’s a workout today. Want to see it or move it to another day?")
     if plan:
-        return tr("今天歇一歇。晚餐想出去吃，还是自己做？", "A rest day today. Heading out for dinner or cooking at home?")
-    return tr("晚餐有想法了吗？一起看看附近有什么。", "Any dinner plans? Let’s see what’s nearby.")
+        return tr("今天歇一歇。下一顿想出去吃，还是自己做？", "A rest day today. Heading out to eat or cooking at home?")
+    return tr("下一顿有想法了吗？一起看看附近有什么。", "Planning your next meal? Let’s see what’s nearby.")
 
 
 def _panel(today, db_path, public_demo):
@@ -257,5 +263,5 @@ def coach_entry(today, db_path, public_demo):
             state["open"] = True
             state["dinner_only"] = False
     if state["open"]:
-        title = tr("今晚的晚餐", "Dinner tonight") if state.get("dinner_only") else tr("米团顾问", "Mituan, your coach")
+        title = tr("补齐今天营养", "Close today’s gaps") if state.get("dinner_only") else tr("米团顾问", "Mituan, your coach")
         st.dialog(title, on_dismiss=_close)(_panel)(today, db_path, public_demo)
